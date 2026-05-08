@@ -4,19 +4,19 @@
 ![Anchor Framework](https://img.shields.io/badge/Anchor-v0.32-blue?style=for-the-badge)
 ![React](https://img.shields.io/badge/React-v19-61DAFB?style=for-the-badge&logo=react)
 
-**TrustLayer** is a decentralized protocol designed to revolutionize the freelance and peer-to-peer economy by bringing the entire project lifecycle—from escrow to reputation—on-chain. 
+**TrustLayer** is a decentralized protocol designed to provide a secure, transparent, and trustless infrastructure for the peer-to-peer economy. By bringing the entire escrow and reputation lifecycle on-chain, TrustLayer empowers global talent and clients to collaborate directly without the need for centralized intermediaries.
 
-Built on the Solana blockchain, TrustLayer eliminates the need for high-fee intermediaries like Upwork or Fiverr, providing a secure, transparent, and trustless environment for global talent and clients to collaborate. By leveraging program-managed vaults and immutable reputation scores, TrustLayer ensures that trust is built into the code, not the platform.
+Leveraging the high-speed Solana blockchain, the protocol ensures that payments are secured in program-managed vaults and reputation is built through immutable, verifiable work history.
 
 ---
 
 ## Key Features
 
--   **Atomic Escrow**: Guaranteed exchange of assets; funds are held in secure, program-derived vaults and only released upon successful completion or agreement.
--   **No Middleman Fees**: Transactions happen directly between parties, bypassing the 10-20% commissions charged by traditional freelance platforms.
--   **Immutable Reputation**: Build a portable, on-chain work history that belongs to you, not a centralized database.
--   **Global Instant Settlement**: Work for anyone, anywhere, with immediate payment finality and zero cross-border friction.
--   **Automatic Rent Recovery**: Optimized account management that returns SOL rent to users upon closing active escrows.
+-   **Decentralized Escrow**: Payments are secured in specialized vaults governed by smart contract logic, eliminating counterparty risk.
+-   **Direct Collaboration**: Facilitates a direct relationship between parties with full transparency and no platform-level interference.
+-   **On-Chain Reputation**: Enables users to build a verifiable work history that is permanent, portable, and belongs entirely to them.
+-   **Global Instant Finality**: Provides immediate settlement for international transactions with zero cross-border friction or delays.
+-   **Automated Rent Management**: Efficiently manages Solana's rent-exemption system by returning SOL to users upon contract closure.
 
 ---
 
