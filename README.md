@@ -8,7 +8,7 @@
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
 -   **Atomic Swaps**: Guaranteed exchange of tokens; either the swap completes fully or assets are returned.
 -   **Secure Vault System**: Assets are held in a Program Derived Address (PDA) vault, ensuring no middleman or third party has access.
@@ -18,7 +18,7 @@
 
 ---
 
-## 🛠 Tech Stack
+## Tech Stack
 
 -   **Smart Contract**: [Anchor Framework](https://www.anchor-lang.com/) (Rust)
 -   **Frontend**: React + Vite + TypeScript
@@ -28,7 +28,7 @@
 
 ---
 
-## 🏗 Architecture
+## Architecture
 
 TrustLayer uses a dual-account PDA architecture to manage trades:
 
@@ -39,7 +39,7 @@ TrustLayer uses a dual-account PDA architecture to manage trades:
 
 ---
 
-## 🏁 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -68,7 +68,7 @@ TrustLayer uses a dual-account PDA architecture to manage trades:
 
 ---
 
-## 🧪 Testing
+## Testing
 
 Run the comprehensive test suite to verify all instructions:
 
@@ -77,13 +77,13 @@ anchor test
 ```
 
 Tests cover:
--   ✅ **Make**: Initialization and vault locking.
--   ✅ **Take**: Successful atomic swap and account closure.
--   ✅ **Refund**: Secure cancellation by the Maker.
+-   **Make**: Initialization and vault locking.
+-   **Take**: Successful atomic swap and account closure.
+-   **Refund**: Secure cancellation by the Maker.
 
 ---
 
-## 💻 Running Locally
+## Running Locally
 
 1.  **Start a local validator:**
     ```bash
@@ -103,10 +103,10 @@ Tests cover:
 
 ---
 
-## 📝 License
+## License
 
 Distributed under the ISC License. See `LICENSE` for more information.
 
 ---
 
-Built with 💜 on Solana.
+Built with pride on Solana.
