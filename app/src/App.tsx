@@ -1,11 +1,13 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { ConnectionProvider, WalletProvider, useWallet, useAnchorWallet } from '@solana/wallet-adapter-react';
 import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
 import { WalletModalProvider, WalletMultiButton } from '@solana/wallet-adapter-react-ui';
-import { Connection } from '@solana/web3.js';
+import { Connection, PublicKey } from '@solana/web3.js';
+import * as anchor from '@coral-xyz/anchor';
 import { AnchorProvider, Program } from '@coral-xyz/anchor';
-import { motion } from 'framer-motion';
-import { Shield, ArrowRightLeft, Lock, RefreshCw, Layers, Zap } from 'lucide-react';
+import { getAssociatedTokenAddressSync } from '@solana/spl-token';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Shield, ArrowRightLeft, Lock, RefreshCw, Layers, Zap, ExternalLink, Trash2 } from 'lucide-react';
 
 // Import IDL
 import idl from './trustlayer.json';
@@ -22,6 +24,10 @@ function EscrowContent() {
   const [mintA, setMintA] = useState('');
   const [mintB, setMintB] = useState('');
   const [loading, setLoading] = useState(false);
+  const [escrows, setEscrows] = useState<any[]>([]);
+  const [fetching, setFetching] = useState(false);
+  const [processing, setProcessing] = useState<string | null>(null);
+
 
   const connection = new Connection("http://127.0.0.1:8899", 'confirmed');
   
@@ -33,21 +39,158 @@ function EscrowContent() {
     return null;
   }, [anchorWallet]);
 
+  const fetchEscrows = async () => {
+    if (!program) return;
+    setFetching(true);
+    try {
+      const accounts = await program.account.escrow.all();
+      setEscrows(accounts);
+    } catch (err) {
+      console.error("Error fetching escrows:", err);
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  useEffect(() => {
+    if (program) {
+      fetchEscrows();
+    }
+  }, [program]);
+
   const handleMake = async () => {
     if (!program || !publicKey) return;
     setLoading(true);
     try {
-      // Note: In a real app, we'd derive PDAs and check ATAs here
-      // This is a simplified version for the UI demonstration
-      console.log("Creating escrow...");
-      // Logic for derivation and RPC call would go here
-      await new Promise(r => setTimeout(r, 2000)); // Simulate
-      alert("Escrow created successfully! (Simulation)");
-    } catch (err) {
+      const mintAPubkey = new PublicKey(mintA);
+      const mintBPubkey = new PublicKey(mintB);
+      const amountABN = new anchor.BN(amountA);
+      const amountBBN = new anchor.BN(amountB);
+
+      const [escrowPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("escrow"), publicKey.toBuffer(), mintAPubkey.toBuffer()],
+        program.programId
+      );
+
+      const [vaultPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("vault"), escrowPDA.toBuffer()],
+        program.programId
+      );
+
+      const makerTokenAccountA = getAssociatedTokenAddressSync(
+        mintAPubkey,
+        publicKey
+      );
+
+      await program.methods
+        .make(amountABN, amountBBN)
+        .accounts({
+          maker: publicKey,
+          mintA: mintAPubkey,
+          mintB: mintBPubkey,
+          makerTokenAccountA: makerTokenAccountA,
+          escrow: escrowPDA,
+          vault: vaultPDA,
+        } as any)
+        .rpc();
+
+      alert("Escrow created successfully!");
+      setAmountA('');
+      setAmountB('');
+      setMintA('');
+      setMintB('');
+      fetchEscrows();
+    } catch (err: any) {
       console.error(err);
-      alert("Failed to create escrow");
+      alert("Failed to create escrow: " + (err.message || err));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleTake = async (escrow: any) => {
+    if (!program || !publicKey) return;
+    const id = escrow.publicKey.toString();
+    setProcessing(id);
+    try {
+      const { maker, mintA, mintB } = escrow.account;
+      
+      const [escrowPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("escrow"), maker.toBuffer(), mintA.toBuffer()],
+        program.programId
+      );
+
+      const [vaultPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("vault"), escrowPDA.toBuffer()],
+        program.programId
+      );
+
+      const takerTokenAccountA = getAssociatedTokenAddressSync(mintA, publicKey);
+      const takerTokenAccountB = getAssociatedTokenAddressSync(mintB, publicKey);
+      const makerTokenAccountB = getAssociatedTokenAddressSync(mintB, maker);
+
+      await program.methods
+        .take()
+        .accounts({
+          taker: publicKey,
+          maker: maker,
+          mintA: mintA,
+          mintB: mintB,
+          takerTokenAccountA: takerTokenAccountA,
+          takerTokenAccountB: takerTokenAccountB,
+          makerTokenAccountB: makerTokenAccountB,
+          escrow: escrowPDA,
+          vault: vaultPDA,
+        } as any)
+        .rpc();
+
+      alert("Trade completed!");
+      fetchEscrows();
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to take trade: " + (err.message || err));
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const handleRefund = async (escrow: any) => {
+    if (!program || !publicKey) return;
+    const id = escrow.publicKey.toString();
+    setProcessing(id);
+    try {
+      const { mintA } = escrow.account;
+      
+      const [escrowPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("escrow"), publicKey.toBuffer(), mintA.toBuffer()],
+        program.programId
+      );
+
+      const [vaultPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("vault"), escrowPDA.toBuffer()],
+        program.programId
+      );
+
+      const makerTokenAccountA = getAssociatedTokenAddressSync(mintA, publicKey);
+
+      await program.methods
+        .refund()
+        .accounts({
+          maker: publicKey,
+          mintA: mintA,
+          makerTokenAccountA: makerTokenAccountA,
+          escrow: escrowPDA,
+          vault: vaultPDA,
+        } as any)
+        .rpc();
+
+      alert("Escrow refunded!");
+      fetchEscrows();
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to refund: " + (err.message || err));
+    } finally {
+      setProcessing(null);
     }
   };
 
@@ -62,7 +205,16 @@ function EscrowContent() {
             Trust<span className="gradient-text">Layer</span>
           </h1>
         </div>
-        <WalletMultiButton />
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={fetchEscrows}
+            disabled={fetching}
+            className="p-2 hover:bg-white/5 rounded-full transition-colors"
+          >
+            <RefreshCw className={`w-5 h-5 ${fetching ? 'animate-spin' : ''}`} />
+          </button>
+          <WalletMultiButton />
+        </div>
       </header>
 
       <main>
@@ -154,19 +306,102 @@ function EscrowContent() {
           </motion.div>
 
           <motion.div 
-            whileHover={{ scale: 1.02 }}
-            className="glass p-8 flex flex-col"
+            className="lg:col-span-7 glass p-8 flex flex-col min-h-[500px]"
           >
-            <div className="flex items-center gap-4 mb-6">
-              <div className="p-3 bg-secondary/10 rounded-xl">
-                <ArrowRightLeft className="text-secondary" />
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-secondary/10 rounded-xl">
+                  <ArrowRightLeft className="text-secondary" />
+                </div>
+                <h3 className="text-2xl font-bold">Active Trades</h3>
               </div>
-              <h3 className="text-2xl font-bold">Active Trades</h3>
+              <span className="px-3 py-1 bg-white/5 rounded-full text-xs font-mono text-text-secondary">
+                {escrows.length} Total
+              </span>
             </div>
-            <div className="flex-1 flex flex-col items-center justify-center text-center p-8 space-y-4">
-              <Layers size={48} className="text-text-secondary opacity-20" />
-              <p className="text-text-secondary">No active escrows found for your wallet.</p>
-              <button className="text-primary font-semibold hover:underline">Browse Public Trades</button>
+
+            <div className="flex-1 overflow-y-auto pr-2 space-y-4">
+              <AnimatePresence mode="popLayout">
+                {escrows.length === 0 ? (
+                  <motion.div 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="flex flex-col items-center justify-center text-center p-12 space-y-4"
+                  >
+                    <Layers size={48} className="text-text-secondary opacity-20" />
+                    <p className="text-text-secondary">No active escrows found on-chain.</p>
+                  </motion.div>
+                ) : (
+                  escrows.map((escrow) => (
+                    <motion.div
+                      key={escrow.publicKey.toString()}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      className="p-5 rounded-2xl bg-white/5 border border-white/10 hover:border-primary/30 transition-all group"
+                    >
+                      <div className="flex justify-between items-start mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono text-text-secondary bg-white/5 px-2 py-1 rounded">
+                            {escrow.publicKey.toString().slice(0, 4)}...{escrow.publicKey.toString().slice(-4)}
+                          </span>
+                          {escrow.account.maker.toString() === publicKey?.toString() && (
+                            <span className="text-[10px] uppercase tracking-wider font-bold text-primary bg-primary/10 px-2 py-0.5 rounded">
+                              Your Trade
+                            </span>
+                          )}
+                        </div>
+                        <a 
+                          href={`https://explorer.solana.com/address/${escrow.publicKey.toString()}?cluster=custom&customUrl=http://localhost:8899`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-white/10 rounded-lg"
+                        >
+                          <ExternalLink size={14} className="text-text-secondary" />
+                        </a>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <p className="text-[10px] uppercase text-text-secondary font-bold mb-1">Giving</p>
+                          <p className="text-lg font-bold truncate">
+                            {escrow.account.amountA.toString()} <span className="text-xs text-text-secondary font-normal">Tokens</span>
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[10px] uppercase text-text-secondary font-bold mb-1">Asking for</p>
+                          <p className="text-lg font-bold text-secondary truncate">
+                            {escrow.account.amountB.toString()} <span className="text-xs text-text-secondary font-normal">Tokens</span>
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2">
+                        {escrow.account.maker.toString() === publicKey?.toString() ? (
+                          <button 
+                            onClick={() => handleRefund(escrow)}
+                            disabled={!!processing}
+                            className="flex-1 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                          >
+                            {processing === escrow.publicKey.toString() ? <RefreshCw className="animate-spin w-4 h-4" /> : <Trash2 size={16} />}
+                            Cancel & Refund
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={() => handleTake(escrow)}
+                            disabled={!!processing}
+                            className="flex-1 py-2 rounded-xl bg-secondary hover:bg-secondary/80 text-black text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                          >
+                            {processing === escrow.publicKey.toString() ? <RefreshCw className="animate-spin w-4 h-4" /> : null}
+                            Take Trade
+                          </button>
+                        )}
+                      </div>
+                    </motion.div>
+                  ))
+                )}
+              </AnimatePresence>
             </div>
           </motion.div>
         </div>
