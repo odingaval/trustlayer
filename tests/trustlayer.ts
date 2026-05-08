@@ -127,4 +127,65 @@ describe("trustlayer", () => {
     const escrowAccount = await connection.getAccountInfo(escrowPDA);
     expect(escrowAccount).to.be.null;
   });
+
+  it("Escrow: Refund!", async () => {
+    // 1. Setup a fresh escrow
+    const refundMaker = anchor.web3.Keypair.generate();
+    await connection.confirmTransaction(
+      await connection.requestAirdrop(refundMaker.publicKey, 2 * anchor.web3.LAMPORTS_PER_SOL)
+    );
+
+    const mintC = await createMint(connection, refundMaker, refundMaker.publicKey, null, 6);
+    const mintD = await createMint(connection, refundMaker, refundMaker.publicKey, null, 6);
+
+    const makerTokenAccountC = (await getOrCreateAssociatedTokenAccount(connection, refundMaker, mintC, refundMaker.publicKey)).address;
+    await mintTo(connection, refundMaker, mintC, makerTokenAccountC, refundMaker, 1000);
+
+    const [escrowPDA] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("escrow"), refundMaker.publicKey.toBuffer(), mintC.toBuffer()],
+      program.programId
+    );
+
+    const [vaultPDA] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), escrowPDA.toBuffer()],
+      program.programId
+    );
+
+    // 2. Make
+    await program.methods
+      .make(new anchor.BN(1000), new anchor.BN(500))
+      .accounts({
+        maker: refundMaker.publicKey,
+        mintA: mintC,
+        mintB: mintD,
+        makerTokenAccountA: makerTokenAccountC,
+        escrow: escrowPDA,
+        vault: vaultPDA,
+      } as any)
+      .signers([refundMaker])
+      .rpc();
+
+    // 3. Refund
+    await program.methods
+      .refund()
+      .accounts({
+        maker: refundMaker.publicKey,
+        mintA: mintC,
+        makerTokenAccountA: makerTokenAccountC,
+        escrow: escrowPDA,
+        vault: vaultPDA,
+      } as any)
+      .signers([refundMaker])
+      .rpc();
+
+    // 4. Verify
+    const makerBalance = await connection.getTokenAccountBalance(makerTokenAccountC);
+    expect(makerBalance.value.amount).to.equal("1000");
+
+    const escrowAccount = await connection.getAccountInfo(escrowPDA);
+    expect(escrowAccount).to.be.null;
+
+    const vaultAccount = await connection.getAccountInfo(vaultPDA);
+    expect(vaultAccount).to.be.null;
+  });
 });
