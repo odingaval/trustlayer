@@ -4,17 +4,19 @@
 ![Anchor Framework](https://img.shields.io/badge/Anchor-v0.32-blue?style=for-the-badge)
 ![React](https://img.shields.io/badge/React-v19-61DAFB?style=for-the-badge&logo=react)
 
-**TrustLayer** is a high-performance, secure, and fully decentralized escrow protocol built on the Solana blockchain. It enables trustless token swaps between two parties using a secure vault system managed entirely by smart contracts.
+**TrustLayer** is a decentralized protocol designed to revolutionize the freelance and peer-to-peer economy by bringing the entire project lifecycle—from escrow to reputation—on-chain. 
+
+Built on the Solana blockchain, TrustLayer eliminates the need for high-fee intermediaries like Upwork or Fiverr, providing a secure, transparent, and trustless environment for global talent and clients to collaborate. By leveraging program-managed vaults and immutable reputation scores, TrustLayer ensures that trust is built into the code, not the platform.
 
 ---
 
 ## Key Features
 
--   **Atomic Swaps**: Guaranteed exchange of tokens; either the swap completes fully or assets are returned.
--   **Secure Vault System**: Assets are held in a Program Derived Address (PDA) vault, ensuring no middleman or third party has access.
--   **Full Transparency**: Every state change (Make, Take, Refund) is verifiable on-chain.
--   **Modern UI/UX**: Built with React, Framer Motion, and Tailwind CSS for a premium, responsive trading experience.
--   **Automatic Account Closure**: Program efficiently closes accounts after completion to reclaim SOL rent for the users.
+-   **Atomic Escrow**: Guaranteed exchange of assets; funds are held in secure, program-derived vaults and only released upon successful completion or agreement.
+-   **No Middleman Fees**: Transactions happen directly between parties, bypassing the 10-20% commissions charged by traditional freelance platforms.
+-   **Immutable Reputation**: Build a portable, on-chain work history that belongs to you, not a centralized database.
+-   **Global Instant Settlement**: Work for anyone, anywhere, with immediate payment finality and zero cross-border friction.
+-   **Automatic Rent Recovery**: Optimized account management that returns SOL rent to users upon closing active escrows.
 
 ---
 
@@ -30,11 +32,11 @@
 
 ## Architecture
 
-TrustLayer uses a dual-account PDA architecture to manage trades:
+TrustLayer uses a dual-account PDA (Program Derived Address) architecture to manage trades:
 
-1.  **Escrow Account**: Stores the trade state (Maker, Mints, Amounts, Bump).
+1.  **Escrow Account**: Stores the trade state (Maker, Mints, Amounts, and status).
     *   *Seeds*: `[b"escrow", maker_pubkey, mint_a_pubkey]`
-2.  **Vault Account**: A Token Account owned by the Escrow PDA that safely holds the offered assets.
+2.  **Vault Account**: A secure Token Account owned by the Escrow PDA that holds assets during the trade.
     *   *Seeds*: `[b"vault", escrow_pubkey]`
 
 ---
@@ -77,9 +79,9 @@ anchor test
 ```
 
 Tests cover:
--   **Make**: Initialization and vault locking.
--   **Take**: Successful atomic swap and account closure.
--   **Refund**: Secure cancellation by the Maker.
+-   **Make**: Initialization and secure vault locking.
+-   **Take**: Successful atomic swap and automatic account closure.
+-   **Refund**: Secure cancellation and asset reclamation by the Maker.
 
 ---
 
