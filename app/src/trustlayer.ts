@@ -14,37 +14,69 @@ export type Trustlayer = {
   },
   "instructions": [
     {
-      "name": "make",
+      "name": "acceptJob",
       "discriminator": [
-        138,
-        227,
-        232,
-        77,
-        223,
-        166,
+        43,
+        201,
+        124,
+        1,
+        19,
+        189,
         96,
-        197
+        10
       ],
       "accounts": [
         {
-          "name": "maker",
+          "name": "freelancer",
           "writable": true,
           "signer": true
         },
         {
-          "name": "mintA"
+          "name": "job",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "approveAndRelease",
+      "discriminator": [
+        63,
+        254,
+        154,
+        45,
+        149,
+        32,
+        80,
+        236
+      ],
+      "accounts": [
+        {
+          "name": "client",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "job"
+          ]
         },
         {
-          "name": "mintB"
+          "name": "freelancer"
         },
         {
-          "name": "makerTokenAccountA",
+          "name": "job",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "freelancerTokenAccount",
           "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "account",
-                "path": "maker"
+                "path": "freelancer"
               },
               {
                 "kind": "const",
@@ -85,7 +117,7 @@ export type Trustlayer = {
               },
               {
                 "kind": "account",
-                "path": "mintA"
+                "path": "mint"
               }
             ],
             "program": {
@@ -128,28 +160,335 @@ export type Trustlayer = {
           }
         },
         {
-          "name": "escrow",
+          "name": "vault",
           "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  101,
-                  115,
-                  99,
-                  114,
-                  111,
-                  119
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
                 ]
               },
               {
                 "kind": "account",
-                "path": "maker"
+                "path": "job"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "cancelJob",
+      "discriminator": [
+        126,
+        241,
+        155,
+        241,
+        50,
+        236,
+        83,
+        118
+      ],
+      "accounts": [
+        {
+          "name": "client",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "job"
+          ]
+        },
+        {
+          "name": "job",
+          "writable": true
+        },
+        {
+          "name": "clientTokenAccount",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "client"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
               },
               {
                 "kind": "account",
-                "path": "mintA"
+                "path": "job.mint",
+                "account": "jobEscrow"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "job"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "disputeJob",
+      "discriminator": [
+        101,
+        104,
+        253,
+        231,
+        1,
+        139,
+        108,
+        100
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "job",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initializeJob",
+      "discriminator": [
+        137,
+        22,
+        138,
+        41,
+        76,
+        208,
+        114,
+        50
+      ],
+      "accounts": [
+        {
+          "name": "client",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "clientTokenAccount",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "client"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "job",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  106,
+                  111,
+                  98
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "client"
+              },
+              {
+                "kind": "arg",
+                "path": "jobId"
               }
             ]
           }
@@ -171,7 +510,7 @@ export type Trustlayer = {
               },
               {
                 "kind": "account",
-                "path": "escrow"
+                "path": "job"
               }
             ]
           }
@@ -195,571 +534,293 @@ export type Trustlayer = {
       ],
       "args": [
         {
-          "name": "amountA",
+          "name": "jobId",
           "type": "u64"
         },
         {
-          "name": "amountB",
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "arbiter",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "resolveDispute",
+      "discriminator": [
+        231,
+        6,
+        202,
+        6,
+        96,
+        103,
+        12,
+        230
+      ],
+      "accounts": [
+        {
+          "name": "arbiter",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "job"
+          ]
+        },
+        {
+          "name": "client",
+          "writable": true
+        },
+        {
+          "name": "freelancer",
+          "writable": true
+        },
+        {
+          "name": "job",
+          "writable": true
+        },
+        {
+          "name": "clientTokenAccount",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "client"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "job.mint",
+                "account": "jobEscrow"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "freelancerTokenAccount",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "freelancer"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "job.mint",
+                "account": "jobEscrow"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "job"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "clientAward",
+          "type": "u64"
+        },
+        {
+          "name": "freelancerAward",
           "type": "u64"
         }
       ]
     },
     {
-      "name": "refund",
+      "name": "submitWork",
       "discriminator": [
-        2,
-        96,
-        183,
-        251,
-        63,
-        208,
-        46,
-        46
+        158,
+        80,
+        101,
+        51,
+        114,
+        130,
+        101,
+        253
       ],
       "accounts": [
         {
-          "name": "maker",
-          "writable": true,
-          "signer": true,
-          "relations": [
-            "escrow"
-          ]
-        },
-        {
-          "name": "mintA",
-          "relations": [
-            "escrow"
-          ]
-        },
-        {
-          "name": "makerTokenAccountA",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "maker"
-              },
-              {
-                "kind": "const",
-                "value": [
-                  6,
-                  221,
-                  246,
-                  225,
-                  215,
-                  101,
-                  161,
-                  147,
-                  217,
-                  203,
-                  225,
-                  70,
-                  206,
-                  235,
-                  121,
-                  172,
-                  28,
-                  180,
-                  133,
-                  237,
-                  95,
-                  91,
-                  55,
-                  145,
-                  58,
-                  140,
-                  245,
-                  133,
-                  126,
-                  255,
-                  0,
-                  169
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mintA"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
-          "name": "escrow",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  101,
-                  115,
-                  99,
-                  114,
-                  111,
-                  119
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "maker"
-              },
-              {
-                "kind": "account",
-                "path": "mintA"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "escrow"
-              }
-            ]
-          }
-        },
-        {
-          "name": "systemProgram",
-          "address": "11111111111111111111111111111111"
-        },
-        {
-          "name": "tokenProgram",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        },
-        {
-          "name": "associatedTokenProgram",
-          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
-        },
-        {
-          "name": "rent",
-          "address": "SysvarRent111111111111111111111111111111111"
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "take",
-      "discriminator": [
-        149,
-        226,
-        52,
-        104,
-        6,
-        142,
-        230,
-        39
-      ],
-      "accounts": [
-        {
-          "name": "taker",
+          "name": "freelancer",
           "writable": true,
           "signer": true
         },
         {
-          "name": "maker",
-          "writable": true,
-          "relations": [
-            "escrow"
-          ]
-        },
-        {
-          "name": "mintA",
-          "relations": [
-            "escrow"
-          ]
-        },
-        {
-          "name": "mintB",
-          "relations": [
-            "escrow"
-          ]
-        },
-        {
-          "name": "takerTokenAccountA",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "taker"
-              },
-              {
-                "kind": "const",
-                "value": [
-                  6,
-                  221,
-                  246,
-                  225,
-                  215,
-                  101,
-                  161,
-                  147,
-                  217,
-                  203,
-                  225,
-                  70,
-                  206,
-                  235,
-                  121,
-                  172,
-                  28,
-                  180,
-                  133,
-                  237,
-                  95,
-                  91,
-                  55,
-                  145,
-                  58,
-                  140,
-                  245,
-                  133,
-                  126,
-                  255,
-                  0,
-                  169
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mintA"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
-          "name": "takerTokenAccountB",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "taker"
-              },
-              {
-                "kind": "const",
-                "value": [
-                  6,
-                  221,
-                  246,
-                  225,
-                  215,
-                  101,
-                  161,
-                  147,
-                  217,
-                  203,
-                  225,
-                  70,
-                  206,
-                  235,
-                  121,
-                  172,
-                  28,
-                  180,
-                  133,
-                  237,
-                  95,
-                  91,
-                  55,
-                  145,
-                  58,
-                  140,
-                  245,
-                  133,
-                  126,
-                  255,
-                  0,
-                  169
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mintB"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
-          "name": "makerTokenAccountB",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "maker"
-              },
-              {
-                "kind": "const",
-                "value": [
-                  6,
-                  221,
-                  246,
-                  225,
-                  215,
-                  101,
-                  161,
-                  147,
-                  217,
-                  203,
-                  225,
-                  70,
-                  206,
-                  235,
-                  121,
-                  172,
-                  28,
-                  180,
-                  133,
-                  237,
-                  95,
-                  91,
-                  55,
-                  145,
-                  58,
-                  140,
-                  245,
-                  133,
-                  126,
-                  255,
-                  0,
-                  169
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mintB"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
-          "name": "escrow",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  101,
-                  115,
-                  99,
-                  114,
-                  111,
-                  119
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "maker"
-              },
-              {
-                "kind": "account",
-                "path": "mintA"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "escrow"
-              }
-            ]
-          }
-        },
-        {
-          "name": "systemProgram",
-          "address": "11111111111111111111111111111111"
-        },
-        {
-          "name": "tokenProgram",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        },
-        {
-          "name": "associatedTokenProgram",
-          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
-        },
-        {
-          "name": "rent",
-          "address": "SysvarRent111111111111111111111111111111111"
+          "name": "job",
+          "writable": true
         }
       ],
       "args": []
@@ -767,48 +828,108 @@ export type Trustlayer = {
   ],
   "accounts": [
     {
-      "name": "escrow",
+      "name": "jobEscrow",
       "discriminator": [
-        31,
-        213,
-        123,
-        187,
-        186,
-        22,
-        218,
-        155
+        189,
+        224,
+        160,
+        70,
+        105,
+        78,
+        115,
+        151
       ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "invalidStatus",
+      "msg": "Job is not in the correct status for this action"
+    },
+    {
+      "code": 6001,
+      "name": "unauthorized",
+      "msg": "You are not authorized to perform this action"
+    },
+    {
+      "code": 6002,
+      "name": "cannotCancel",
+      "msg": "Cannot cancel a job that is already in progress"
+    },
+    {
+      "code": 6003,
+      "name": "invalidAmount",
+      "msg": "Invalid dispute award amount"
     }
   ],
   "types": [
     {
-      "name": "escrow",
+      "name": "jobEscrow",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "maker",
+            "name": "client",
             "type": "pubkey"
           },
           {
-            "name": "mintA",
+            "name": "freelancer",
             "type": "pubkey"
           },
           {
-            "name": "mintB",
+            "name": "arbiter",
             "type": "pubkey"
           },
           {
-            "name": "amountA",
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
             "type": "u64"
           },
           {
-            "name": "amountB",
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "jobStatus"
+              }
+            }
+          },
+          {
+            "name": "jobId",
             "type": "u64"
           },
           {
             "name": "bump",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "jobStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "open"
+          },
+          {
+            "name": "inProgress"
+          },
+          {
+            "name": "inReview"
+          },
+          {
+            "name": "disputed"
+          },
+          {
+            "name": "completed"
+          },
+          {
+            "name": "refunded"
           }
         ]
       }

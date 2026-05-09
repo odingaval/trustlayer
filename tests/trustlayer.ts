@@ -1,191 +1,290 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { Trustlayer } from "../target/types/trustlayer";
-import { 
-  createMint, 
-  getOrCreateAssociatedTokenAccount, 
-  mintTo, 
-  TOKEN_PROGRAM_ID, 
-  ASSOCIATED_TOKEN_PROGRAM_ID 
+import {
+  createMint,
+  getOrCreateAssociatedTokenAccount,
+  mintTo,
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import { expect } from "chai";
 
 describe("trustlayer", () => {
   anchor.setProvider(anchor.AnchorProvider.env());
 
-  const program = anchor.workspace.trustlayer as Program<Trustlayer>;
-  const provider = anchor.getProvider();
+  const program = anchor.workspace.Trustlayer as Program<Trustlayer>;
+  const provider = anchor.getProvider() as anchor.AnchorProvider;
   const connection = provider.connection;
 
-  const maker = anchor.web3.Keypair.generate();
-  const taker = anchor.web3.Keypair.generate();
+  // Participants
+  const client = anchor.web3.Keypair.generate();
+  const freelancer = anchor.web3.Keypair.generate();
+  const arbiter = anchor.web3.Keypair.generate();
 
-  let mintA: anchor.web3.Pubkey;
-  let mintB: anchor.web3.Pubkey;
-  let makerTokenAccountA: anchor.web3.Pubkey;
-  let makerTokenAccountB: anchor.web3.Pubkey;
-  let takerTokenAccountA: anchor.web3.Pubkey;
-  let takerTokenAccountB: anchor.web3.Pubkey;
+  let mint: anchor.web3.PublicKey;
+  let clientTokenAccount: anchor.web3.PublicKey;
+  let freelancerTokenAccount: anchor.web3.PublicKey;
 
-  const amountA = new anchor.BN(1000);
-  const amountB = new anchor.BN(500);
+  const JOB_AMOUNT = new anchor.BN(1000);
+  const JOB_ID = new anchor.BN(1);
+
+  // Derive PDAs
+  const getJobPDA = (clientKey: anchor.web3.PublicKey, jobId: anchor.BN) => {
+    const [pda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("job"), clientKey.toBuffer(), jobId.toArrayLike(Buffer, "le", 8)],
+      program.programId
+    );
+    return pda;
+  };
+
+  const getVaultPDA = (jobPDA: anchor.web3.PublicKey) => {
+    const [pda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), jobPDA.toBuffer()],
+      program.programId
+    );
+    return pda;
+  };
 
   before(async () => {
-    // Airdrop SOL to maker and taker
-    await connection.confirmTransaction(
-      await connection.requestAirdrop(maker.publicKey, 2 * anchor.web3.LAMPORTS_PER_SOL)
-    );
-    await connection.confirmTransaction(
-      await connection.requestAirdrop(taker.publicKey, 2 * anchor.web3.LAMPORTS_PER_SOL)
-    );
+    // Airdrop SOL
+    for (const kp of [client, freelancer, arbiter]) {
+      await connection.confirmTransaction(
+        await connection.requestAirdrop(kp.publicKey, 2 * anchor.web3.LAMPORTS_PER_SOL)
+      );
+    }
 
-    // Create Mints
-    mintA = await createMint(connection, maker, maker.publicKey, null, 6);
-    mintB = await createMint(connection, taker, taker.publicKey, null, 6);
+    // Create a single mint (client is mint authority)
+    mint = await createMint(connection, client, client.publicKey, null, 6);
 
-    // Create Token Accounts
-    makerTokenAccountA = (await getOrCreateAssociatedTokenAccount(connection, maker, mintA, maker.publicKey)).address;
-    makerTokenAccountB = (await getOrCreateAssociatedTokenAccount(connection, maker, mintB, maker.publicKey)).address;
-    takerTokenAccountA = (await getOrCreateAssociatedTokenAccount(connection, taker, mintA, taker.publicKey)).address;
-    takerTokenAccountB = (await getOrCreateAssociatedTokenAccount(connection, taker, mintB, taker.publicKey)).address;
+    // Create associated token accounts
+    clientTokenAccount = (
+      await getOrCreateAssociatedTokenAccount(connection, client, mint, client.publicKey)
+    ).address;
+    freelancerTokenAccount = (
+      await getOrCreateAssociatedTokenAccount(connection, freelancer, mint, freelancer.publicKey)
+    ).address;
 
-    // Mint tokens to Maker A and Taker B
-    await mintTo(connection, maker, mintA, makerTokenAccountA, maker, 1000);
-    await mintTo(connection, taker, mintB, takerTokenAccountB, taker, 500);
+    // Fund client with tokens
+    await mintTo(connection, client, mint, clientTokenAccount, client, 5000);
   });
 
-  it("Escrow: Make!", async () => {
-    const [escrowPDA] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("escrow"), maker.publicKey.toBuffer(), mintA.toBuffer()],
-      program.programId
-    );
-
-    const [vaultPDA] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), escrowPDA.toBuffer()],
-      program.programId
-    );
+  it("initialize_job: client creates a job and funds the vault", async () => {
+    const jobPDA = getJobPDA(client.publicKey, JOB_ID);
+    const vaultPDA = getVaultPDA(jobPDA);
 
     await program.methods
-      .make(amountA, amountB)
+      .initializeJob(JOB_ID, JOB_AMOUNT, arbiter.publicKey)
       .accounts({
-        maker: maker.publicKey,
-        mintA: mintA,
-        mintB: mintB,
-        makerTokenAccountA: makerTokenAccountA,
-        escrow: escrowPDA,
+        client: client.publicKey,
+        mint,
+        clientTokenAccount,
+        job: jobPDA,
         vault: vaultPDA,
+        systemProgram: anchor.web3.SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       } as any)
-      .signers([maker])
+      .signers([client])
       .rpc();
 
-    // Check vault balance
-    const vaultTokenAccount = await connection.getTokenAccountBalance(vaultPDA);
-    expect(vaultTokenAccount.value.amount).to.equal("1000");
+    // Vault should hold the funds
+    const vaultBalance = await connection.getTokenAccountBalance(vaultPDA);
+    expect(vaultBalance.value.amount).to.equal("1000");
 
-    // Check escrow state
-    const escrowState = await program.account.escrow.fetch(escrowPDA);
-    expect(escrowState.maker.toBase58()).to.equal(maker.publicKey.toBase58());
-    expect(escrowState.amountA.toString()).to.equal("1000");
-    expect(escrowState.amountB.toString()).to.equal("500");
+    // Job account should be Open
+    const job = await program.account.jobEscrow.fetch(jobPDA);
+    expect(job.client.toBase58()).to.equal(client.publicKey.toBase58());
+    expect(job.arbiter.toBase58()).to.equal(arbiter.publicKey.toBase58());
+    expect(job.amount.toString()).to.equal("1000");
+    expect(job.status).to.deep.equal({ open: {} });
   });
 
-  it("Escrow: Take!", async () => {
-    const [escrowPDA] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("escrow"), maker.publicKey.toBuffer(), mintA.toBuffer()],
-      program.programId
-    );
-
-    const [vaultPDA] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), escrowPDA.toBuffer()],
-      program.programId
-    );
+  it("accept_job: freelancer accepts the open job", async () => {
+    const jobPDA = getJobPDA(client.publicKey, JOB_ID);
 
     await program.methods
-      .take()
+      .acceptJob()
       .accounts({
-        taker: taker.publicKey,
-        maker: maker.publicKey,
-        mintA: mintA,
-        mintB: mintB,
-        takerTokenAccountA: takerTokenAccountA,
-        takerTokenAccountB: takerTokenAccountB,
-        makerTokenAccountB: makerTokenAccountB,
-        escrow: escrowPDA,
-        vault: vaultPDA,
+        freelancer: freelancer.publicKey,
+        job: jobPDA,
       } as any)
-      .signers([taker])
+      .signers([freelancer])
       .rpc();
 
-    // Check final balances
-    const makerTokenAccountBBalance = await connection.getTokenAccountBalance(makerTokenAccountB);
-    const takerTokenAccountABalance = await connection.getTokenAccountBalance(takerTokenAccountA);
-
-    expect(makerTokenAccountBBalance.value.amount).to.equal("500");
-    expect(takerTokenAccountABalance.value.amount).to.equal("1000");
-
-    // Escrow account should be closed
-    const escrowAccount = await connection.getAccountInfo(escrowPDA);
-    expect(escrowAccount).to.be.null;
+    const job = await program.account.jobEscrow.fetch(jobPDA);
+    expect(job.freelancer.toBase58()).to.equal(freelancer.publicKey.toBase58());
+    expect(job.status).to.deep.equal({ inProgress: {} });
   });
 
-  it("Escrow: Refund!", async () => {
-    // 1. Setup a fresh escrow
-    const refundMaker = anchor.web3.Keypair.generate();
-    await connection.confirmTransaction(
-      await connection.requestAirdrop(refundMaker.publicKey, 2 * anchor.web3.LAMPORTS_PER_SOL)
-    );
+  it("submit_work: freelancer submits the completed work", async () => {
+    const jobPDA = getJobPDA(client.publicKey, JOB_ID);
 
-    const mintC = await createMint(connection, refundMaker, refundMaker.publicKey, null, 6);
-    const mintD = await createMint(connection, refundMaker, refundMaker.publicKey, null, 6);
-
-    const makerTokenAccountC = (await getOrCreateAssociatedTokenAccount(connection, refundMaker, mintC, refundMaker.publicKey)).address;
-    await mintTo(connection, refundMaker, mintC, makerTokenAccountC, refundMaker, 1000);
-
-    const [escrowPDA] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("escrow"), refundMaker.publicKey.toBuffer(), mintC.toBuffer()],
-      program.programId
-    );
-
-    const [vaultPDA] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), escrowPDA.toBuffer()],
-      program.programId
-    );
-
-    // 2. Make
     await program.methods
-      .make(new anchor.BN(1000), new anchor.BN(500))
+      .submitWork()
       .accounts({
-        maker: refundMaker.publicKey,
-        mintA: mintC,
-        mintB: mintD,
-        makerTokenAccountA: makerTokenAccountC,
-        escrow: escrowPDA,
-        vault: vaultPDA,
+        freelancer: freelancer.publicKey,
+        job: jobPDA,
       } as any)
-      .signers([refundMaker])
+      .signers([freelancer])
       .rpc();
 
-    // 3. Refund
+    const job = await program.account.jobEscrow.fetch(jobPDA);
+    expect(job.status).to.deep.equal({ inReview: {} });
+  });
+
+  it("approve_and_release: client approves and pays the freelancer", async () => {
+    const jobPDA = getJobPDA(client.publicKey, JOB_ID);
+    const vaultPDA = getVaultPDA(jobPDA);
+
     await program.methods
-      .refund()
+      .approveAndRelease()
       .accounts({
-        maker: refundMaker.publicKey,
-        mintA: mintC,
-        makerTokenAccountA: makerTokenAccountC,
-        escrow: escrowPDA,
+        client: client.publicKey,
+        freelancer: freelancer.publicKey,
+        job: jobPDA,
+        mint,
+        freelancerTokenAccount,
         vault: vaultPDA,
+        tokenProgram: TOKEN_PROGRAM_ID,
       } as any)
-      .signers([refundMaker])
+      .signers([client])
       .rpc();
 
-    // 4. Verify
-    const makerBalance = await connection.getTokenAccountBalance(makerTokenAccountC);
-    expect(makerBalance.value.amount).to.equal("1000");
+    // Freelancer should have received tokens
+    const freelancerBalance = await connection.getTokenAccountBalance(freelancerTokenAccount);
+    expect(freelancerBalance.value.amount).to.equal("1000");
 
-    const escrowAccount = await connection.getAccountInfo(escrowPDA);
-    expect(escrowAccount).to.be.null;
+    // Job account should be closed (lamports returned to client)
+    const jobAccount = await connection.getAccountInfo(jobPDA);
+    expect(jobAccount).to.be.null;
+  });
 
+  it("cancel_job: client can cancel an Open job and get a refund", async () => {
+    const cancelJobId = new anchor.BN(2);
+    const jobPDA = getJobPDA(client.publicKey, cancelJobId);
+    const vaultPDA = getVaultPDA(jobPDA);
+
+    // Create a fresh job
+    await program.methods
+      .initializeJob(cancelJobId, JOB_AMOUNT, arbiter.publicKey)
+      .accounts({
+        client: client.publicKey,
+        mint,
+        clientTokenAccount,
+        job: jobPDA,
+        vault: vaultPDA,
+        systemProgram: anchor.web3.SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+      } as any)
+      .signers([client])
+      .rpc();
+
+    const balanceBefore = await connection.getTokenAccountBalance(clientTokenAccount);
+
+    // Cancel it
+    await program.methods
+      .cancelJob()
+      .accounts({
+        client: client.publicKey,
+        job: jobPDA,
+        clientTokenAccount,
+        vault: vaultPDA,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      } as any)
+      .signers([client])
+      .rpc();
+
+    const balanceAfter = await connection.getTokenAccountBalance(clientTokenAccount);
+    // Client should have been refunded 1000 tokens
+    expect(
+      parseInt(balanceAfter.value.amount) - parseInt(balanceBefore.value.amount)
+    ).to.equal(1000);
+
+    // Job and vault should be closed
+    const jobAccount = await connection.getAccountInfo(jobPDA);
+    expect(jobAccount).to.be.null;
     const vaultAccount = await connection.getAccountInfo(vaultPDA);
     expect(vaultAccount).to.be.null;
+  });
+
+  it("dispute_job + resolve_dispute: arbiter splits the funds", async () => {
+    const disputeJobId = new anchor.BN(3);
+    const jobPDA = getJobPDA(client.publicKey, disputeJobId);
+    const vaultPDA = getVaultPDA(jobPDA);
+
+    // Client token account for refund portion
+    const clientTokenAccountInfo = await getOrCreateAssociatedTokenAccount(
+      connection, client, mint, client.publicKey
+    );
+    const freelancerTokenAccountInfo = await getOrCreateAssociatedTokenAccount(
+      connection, freelancer, mint, freelancer.publicKey
+    );
+
+    // Initialize
+    await program.methods
+      .initializeJob(disputeJobId, JOB_AMOUNT, arbiter.publicKey)
+      .accounts({
+        client: client.publicKey,
+        mint,
+        clientTokenAccount,
+        job: jobPDA,
+        vault: vaultPDA,
+        systemProgram: anchor.web3.SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+      } as any)
+      .signers([client])
+      .rpc();
+
+    // Accept
+    await program.methods
+      .acceptJob()
+      .accounts({ freelancer: freelancer.publicKey, job: jobPDA } as any)
+      .signers([freelancer])
+      .rpc();
+
+    // Dispute (called by client)
+    await program.methods
+      .disputeJob()
+      .accounts({ caller: client.publicKey, job: jobPDA } as any)
+      .signers([client])
+      .rpc();
+
+    const job = await program.account.jobEscrow.fetch(jobPDA);
+    expect(job.status).to.deep.equal({ disputed: {} });
+
+    const clientBalBefore = parseInt((await connection.getTokenAccountBalance(clientTokenAccount)).value.amount);
+    const freelancerBalBefore = parseInt((await connection.getTokenAccountBalance(freelancerTokenAccount)).value.amount);
+
+    // Resolve: 600 to freelancer, 400 to client
+    await program.methods
+      .resolveDispute(new anchor.BN(400), new anchor.BN(600))
+      .accounts({
+        arbiter: arbiter.publicKey,
+        client: client.publicKey,
+        freelancer: freelancer.publicKey,
+        job: jobPDA,
+        clientTokenAccount,
+        freelancerTokenAccount,
+        vault: vaultPDA,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      } as any)
+      .signers([arbiter])
+      .rpc();
+
+    const clientBalAfter = parseInt((await connection.getTokenAccountBalance(clientTokenAccount)).value.amount);
+    const freelancerBalAfter = parseInt((await connection.getTokenAccountBalance(freelancerTokenAccount)).value.amount);
+
+    expect(clientBalAfter - clientBalBefore).to.equal(400);
+    expect(freelancerBalAfter - freelancerBalBefore).to.equal(600);
+
+    // Job closed
+    const jobAccount = await connection.getAccountInfo(jobPDA);
+    expect(jobAccount).to.be.null;
   });
 });
