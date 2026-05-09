@@ -7,14 +7,17 @@ export default defineConfig({
   resolve: {
     alias: {
       buffer: 'buffer',
-      events: 'events',
-      util: 'util',
       stream: 'stream-browserify',
+      util: 'util',
       process: 'process/browser',
+      events: 'events',
     },
   },
   define: {
     global: 'globalThis',
-    'process.env': {},
+    'process.env': '{}',
+  },
+  optimizeDeps: {
+    include: ['buffer', 'process', 'events', 'stream-browserify', 'util'],
   },
 })

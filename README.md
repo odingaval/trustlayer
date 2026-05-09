@@ -7,7 +7,7 @@
 **TrustLayer** is a decentralized protocol designed to provide a secure, transparent, and trustless infrastructure for the peer-to-peer economy. By bringing the entire escrow and reputation lifecycle on-chain, TrustLayer empowers global talent and clients to collaborate directly without the need for centralized intermediaries.
 
 Leveraging the high-speed Solana blockchain, the protocol ensures that payments are secured in program-managed vaults and reputation is built through immutable, verifiable work history.
-
+an
 ---
 
 ## Key Features
