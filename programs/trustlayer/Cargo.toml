@@ -9,7 +9,7 @@ crate-type = ["cdylib", "lib"]
 name = "trustlayer"
 
 [features]
-default = []
+default = ["anchor-lang/init-if-needed"]
 cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []
@@ -21,7 +21,7 @@ custom-panic = []
 
 
 [dependencies]
-anchor-lang = "0.32.1"
+anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
 anchor-spl = "0.32.1"
 
 

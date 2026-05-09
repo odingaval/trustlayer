@@ -1,5 +1,5 @@
 {
-  "address": "2Shd1bCR2qrPU9svNZEhi7JMGcnpDqtRr7FrgLckG6ef",
+  "address": "8cChvKd5QmU6CyHcaXKiYgBfFWkX4cQaYbh6FAYDCBwk",
   "metadata": {
     "name": "trustlayer",
     "version": "0.1.0",
@@ -176,8 +176,20 @@
           }
         },
         {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
         }
       ],
       "args": []
@@ -206,6 +218,9 @@
         {
           "name": "job",
           "writable": true
+        },
+        {
+          "name": "mint"
         },
         {
           "name": "client_token_account",
@@ -255,8 +270,7 @@
               },
               {
                 "kind": "account",
-                "path": "job.mint",
-                "account": "JobEscrow"
+                "path": "mint"
               }
             ],
             "program": {
@@ -321,8 +335,20 @@
           }
         },
         {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
         }
       ],
       "args": []
@@ -538,6 +564,14 @@
         {
           "name": "arbiter",
           "type": "pubkey"
+        },
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "type": "string"
         }
       ]
     },
@@ -573,6 +607,9 @@
         {
           "name": "job",
           "writable": true
+        },
+        {
+          "name": "mint"
         },
         {
           "name": "client_token_account",
@@ -622,8 +659,7 @@
               },
               {
                 "kind": "account",
-                "path": "job.mint",
-                "account": "JobEscrow"
+                "path": "mint"
               }
             ],
             "program": {
@@ -713,8 +749,7 @@
               },
               {
                 "kind": "account",
-                "path": "job.mint",
-                "account": "JobEscrow"
+                "path": "mint"
               }
             ],
             "program": {
@@ -779,8 +814,20 @@
           }
         },
         {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
         }
       ],
       "args": [
@@ -894,6 +941,14 @@
           {
             "name": "job_id",
             "type": "u64"
+          },
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "description",
+            "type": "string"
           },
           {
             "name": "bump",

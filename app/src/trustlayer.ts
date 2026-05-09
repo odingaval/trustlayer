@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/trustlayer.json`.
  */
 export type Trustlayer = {
-  "address": "2Shd1bCR2qrPU9svNZEhi7JMGcnpDqtRr7FrgLckG6ef",
+  "address": "8cChvKd5QmU6CyHcaXKiYgBfFWkX4cQaYbh6FAYDCBwk",
   "metadata": {
     "name": "trustlayer",
     "version": "0.1.0",
@@ -182,8 +182,20 @@ export type Trustlayer = {
           }
         },
         {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        },
+        {
           "name": "tokenProgram",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associatedTokenProgram",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
         }
       ],
       "args": []
@@ -212,6 +224,9 @@ export type Trustlayer = {
         {
           "name": "job",
           "writable": true
+        },
+        {
+          "name": "mint"
         },
         {
           "name": "clientTokenAccount",
@@ -261,8 +276,7 @@ export type Trustlayer = {
               },
               {
                 "kind": "account",
-                "path": "job.mint",
-                "account": "jobEscrow"
+                "path": "mint"
               }
             ],
             "program": {
@@ -327,8 +341,20 @@ export type Trustlayer = {
           }
         },
         {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        },
+        {
           "name": "tokenProgram",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associatedTokenProgram",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
         }
       ],
       "args": []
@@ -544,6 +570,14 @@ export type Trustlayer = {
         {
           "name": "arbiter",
           "type": "pubkey"
+        },
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "type": "string"
         }
       ]
     },
@@ -579,6 +613,9 @@ export type Trustlayer = {
         {
           "name": "job",
           "writable": true
+        },
+        {
+          "name": "mint"
         },
         {
           "name": "clientTokenAccount",
@@ -628,8 +665,7 @@ export type Trustlayer = {
               },
               {
                 "kind": "account",
-                "path": "job.mint",
-                "account": "jobEscrow"
+                "path": "mint"
               }
             ],
             "program": {
@@ -719,8 +755,7 @@ export type Trustlayer = {
               },
               {
                 "kind": "account",
-                "path": "job.mint",
-                "account": "jobEscrow"
+                "path": "mint"
               }
             ],
             "program": {
@@ -785,8 +820,20 @@ export type Trustlayer = {
           }
         },
         {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        },
+        {
           "name": "tokenProgram",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associatedTokenProgram",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
         }
       ],
       "args": [
@@ -900,6 +947,14 @@ export type Trustlayer = {
           {
             "name": "jobId",
             "type": "u64"
+          },
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "description",
+            "type": "string"
           },
           {
             "name": "bump",

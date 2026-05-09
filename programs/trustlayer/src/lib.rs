@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 
-declare_id!("2Shd1bCR2qrPU9svNZEhi7JMGcnpDqtRr7FrgLckG6ef");
+declare_id!("8cChvKd5QmU6CyHcaXKiYgBfFWkX4cQaYbh6FAYDCBwk");
 
 #[program]
 pub mod trustlayer {
@@ -12,6 +12,8 @@ pub mod trustlayer {
         job_id: u64,
         amount: u64,
         arbiter: Pubkey,
+        title: String,
+        description: String,
     ) -> Result<()> {
         let job = &mut ctx.accounts.job;
         job.client = ctx.accounts.client.key();
@@ -21,6 +23,8 @@ pub mod trustlayer {
         job.amount = amount;
         job.status = JobStatus::Open;
         job.job_id = job_id;
+        job.title = title;
+        job.description = description;
         job.bump = ctx.bumps.job;
 
         // Transfer funds to vault
@@ -69,7 +73,7 @@ pub mod trustlayer {
         let bump = job.bump;
 
         let seeds = &[
-            b"job",
+            b"job_v2",
             client_key.as_ref(),
             &job_id_bytes,
             &[bump],
@@ -108,7 +112,7 @@ pub mod trustlayer {
         let bump = job.bump;
         
         let seeds = &[
-            b"job",
+            b"job_v2",
             client_key.as_ref(),
             &job_id_bytes,
             &[bump],
@@ -163,7 +167,7 @@ pub mod trustlayer {
         let bump = job.bump;
 
         let seeds = &[
-            b"job",
+            b"job_v2",
             client_key.as_ref(),
             &job_id_bytes,
             &[bump],
@@ -223,11 +227,13 @@ pub struct JobEscrow {
     pub amount: u64,
     pub status: JobStatus,
     pub job_id: u64,
+    pub title: String,
+    pub description: String,
     pub bump: u8,
 }
 
 impl JobEscrow {
-    pub const INIT_SPACE: usize = 32 + 32 + 32 + 32 + 8 + 1 + 8 + 1;
+    pub const INIT_SPACE: usize = 32 + 32 + 32 + 32 + 8 + 1 + 8 + (4 + 100) + (4 + 500) + 1;
 }
 
 #[derive(Accounts)]
@@ -238,7 +244,8 @@ pub struct InitializeJob<'info> {
     pub mint: Account<'info, Mint>,
 
     #[account(
-        mut,
+        init_if_needed,
+        payer = client,
         associated_token::mint = mint,
         associated_token::authority = client,
     )]
@@ -248,7 +255,7 @@ pub struct InitializeJob<'info> {
         init,
         payer = client,
         space = 8 + JobEscrow::INIT_SPACE,
-        seeds = [b"job", client.key().as_ref(), &job_id.to_le_bytes()],
+        seeds = [b"job_v2", client.key().as_ref(), &job_id.to_le_bytes()],
         bump
     )]
     pub job: Account<'info, JobEscrow>,
@@ -304,7 +311,8 @@ pub struct ApproveAndRelease<'info> {
     pub mint: Account<'info, Mint>,
 
     #[account(
-        mut,
+        init_if_needed,
+        payer = client,
         associated_token::mint = mint,
         associated_token::authority = freelancer,
     )]
@@ -317,7 +325,10 @@ pub struct ApproveAndRelease<'info> {
     )]
     pub vault: Account<'info, TokenAccount>,
 
+    pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, anchor_spl::associated_token::AssociatedToken>,
+    pub rent: Sysvar<'info, Rent>,
 }
 
 #[derive(Accounts)]
@@ -331,10 +342,12 @@ pub struct CancelJob<'info> {
         close = client,
     )]
     pub job: Account<'info, JobEscrow>,
+    pub mint: Account<'info, Mint>,
 
     #[account(
-        mut,
-        associated_token::mint = job.mint,
+        init_if_needed,
+        payer = client,
+        associated_token::mint = mint,
         associated_token::authority = client,
     )]
     pub client_token_account: Account<'info, TokenAccount>,
@@ -346,7 +359,10 @@ pub struct CancelJob<'info> {
     )]
     pub vault: Account<'info, TokenAccount>,
 
+    pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, anchor_spl::associated_token::AssociatedToken>,
+    pub rent: Sysvar<'info, Rent>,
 }
 
 #[derive(Accounts)]
@@ -368,11 +384,11 @@ pub struct ResolveDispute<'info> {
 
     /// CHECK: Safe
     #[account(mut)]
-    pub client: UncheckedAccount<'info>,
+    pub client: SystemAccount<'info>,
 
     /// CHECK: Safe
     #[account(mut)]
-    pub freelancer: UncheckedAccount<'info>,
+    pub freelancer: SystemAccount<'info>,
 
     #[account(
         mut,
@@ -380,17 +396,20 @@ pub struct ResolveDispute<'info> {
         close = client,
     )]
     pub job: Account<'info, JobEscrow>,
+    pub mint: Account<'info, Mint>,
 
     #[account(
-        mut,
-        associated_token::mint = job.mint,
+        init_if_needed,
+        payer = arbiter,
+        associated_token::mint = mint,
         associated_token::authority = client,
     )]
     pub client_token_account: Account<'info, TokenAccount>,
 
     #[account(
-        mut,
-        associated_token::mint = job.mint,
+        init_if_needed,
+        payer = arbiter,
+        associated_token::mint = mint,
         associated_token::authority = freelancer,
     )]
     pub freelancer_token_account: Account<'info, TokenAccount>,
@@ -402,7 +421,10 @@ pub struct ResolveDispute<'info> {
     )]
     pub vault: Account<'info, TokenAccount>,
 
+    pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, anchor_spl::associated_token::AssociatedToken>,
+    pub rent: Sysvar<'info, Rent>,
 }
 
 #[error_code]

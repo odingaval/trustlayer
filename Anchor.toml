@@ -6,13 +6,13 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-trustlayer = "2Shd1bCR2qrPU9svNZEhi7JMGcnpDqtRr7FrgLckG6ef"
+trustlayer = "8cChvKd5QmU6CyHcaXKiYgBfFWkX4cQaYbh6FAYDCBwk"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "localnet"
+cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
