@@ -5,6 +5,24 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TrustLayer Protocol</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/buffer/6.0.3/buffer.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/events/3.3.0/events.min.js"></script>
+    <script>
+      // Ironclad early polyfills
+      window.Buffer = window.Buffer || buffer.Buffer;
+      window.global = window;
+      window.EventEmitter = window.EventEmitter || (window.events && window.events.EventEmitter);
+      window.process = { 
+        env: { NODE_ENV: 'development' },
+        browser: true,
+        version: 'v16.0.0',
+        nextTick: (cb) => setTimeout(cb, 0)
+      };
+      // Fallback for libraries that check window.crypto
+      if (!window.crypto.subtle && window.crypto.webkitSubtle) {
+        window.crypto.subtle = window.crypto.webkitSubtle;
+      }
+    </script>
   </head>
   <body>
     <div id="root">

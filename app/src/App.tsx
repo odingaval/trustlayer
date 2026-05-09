@@ -1,13 +1,11 @@
-import { useState, useMemo, useCallback } from 'react';
-import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
-import { SolflareWalletAdapter, PhantomWalletAdapter } from '@solana/wallet-adapter-wallets';
-import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
-import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
+import { useState, useMemo, useCallback, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Shield, ArrowRight, Lock, Layers, Zap, CheckCircle, XCircle, Info } from 'lucide-react';
+import { Shield, ArrowRight, Lock, Layers, Zap, CheckCircle, XCircle, Info, Loader2 } from 'lucide-react';
 
 import '@solana/wallet-adapter-react-ui/styles.css';
-import { FreelanceContent } from './FreelanceContent';
+
+// Lazy load the heavy Solana content and its providers
+const SolanaWrapper = lazy(() => import('./SolanaWrapper'));
 
 // ── Toast System ─────────────────────────────────────────────
 type ToastType = 'success' | 'error' | 'info';
@@ -59,7 +57,14 @@ function EscrowContent() {
   return (
     <>
       <ToastContainer toasts={toast.toasts} remove={toast.remove} />
-      <FreelanceContent toast={toast} />
+      <Suspense fallback={
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: 20 }}>
+          <Loader2 size={40} className="spin" color="var(--primary)" />
+          <p style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>Initializing Secure Layers...</p>
+        </div>
+      }>
+        <SolanaWrapper toast={toast} />
+      </Suspense>
     </>
   );
 }
@@ -136,26 +141,12 @@ function LandingPage({ onLaunch }: { onLaunch: () => void }) {
 export default function App() {
   const [isAppLaunched, setIsAppLaunched] = useState(false);
 
-  // Use localnet for development; swap to WalletAdapterNetwork.Devnet for devnet
-  const network = WalletAdapterNetwork.Devnet; // kept for type-check; endpoint overrides
-  void network;
-  const endpoint = 'http://127.0.0.1:8899'; // local validator
-
-  const wallets = useMemo(
-    () => [new PhantomWalletAdapter(), new SolflareWalletAdapter()],
-    []
-  );
-
   return (
-    <ConnectionProvider endpoint={endpoint}>
-      <WalletProvider wallets={wallets} autoConnect>
-        <WalletModalProvider>
-          {isAppLaunched
-            ? <EscrowContent />
-            : <LandingPage onLaunch={() => setIsAppLaunched(true)} />
-          }
-        </WalletModalProvider>
-      </WalletProvider>
-    </ConnectionProvider>
+    <>
+      {isAppLaunched
+        ? <EscrowContent />
+        : <LandingPage onLaunch={() => setIsAppLaunched(true)} />
+      }
+    </>
   );
 }

@@ -1,9 +1,6 @@
 // Must be first — polyfills for Solana/web3.js in browser
-import { Buffer } from 'buffer/';
-import process from 'process/browser';
-(window as any).Buffer = Buffer;
-(window as any).global = window;
-(window as any).process = process;
+import { Buffer } from 'buffer';
+window.Buffer = Buffer;
 
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'

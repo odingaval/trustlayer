@@ -1,4 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
+import { Buffer } from 'buffer';
+window.Buffer = window.Buffer || Buffer;
+
 import { useWallet, useAnchorWallet, useConnection } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { PublicKey } from '@solana/web3.js';
