@@ -2,9 +2,9 @@ import { useMemo, Suspense, lazy } from 'react';
 import { Buffer } from 'buffer';
 
 // Ensure Buffer is global before ANY other Solana imports
-window.Buffer = window.Buffer || Buffer;
-window.global = window.global || window;
-window.process = window.process || { env: {} };
+window.Buffer = (window as any).Buffer || Buffer;
+window.global = (window as any).global || window;
+window.process = (window as any).process || { env: {} };
 
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
@@ -19,8 +19,11 @@ export default function SolanaWrapper({ toast }: { toast: any }) {
   // Use Devnet for testing as it's more reliable for handshake verification
   const endpoint = useMemo(() => clusterApiUrl('devnet'), []);
   
-  // Use standard discovery (empty array) for better compatibility with modern wallets
-  const wallets = useMemo(() => [], []);
+  // Explicitly list adapters for better stability
+  const wallets = useMemo(() => [
+    new PhantomWalletAdapter(),
+    new SolflareWalletAdapter(),
+  ], []);
 
   return (
     <ConnectionProvider endpoint={endpoint}>
@@ -44,18 +47,31 @@ export default function SolanaWrapper({ toast }: { toast: any }) {
 
 // Simple internal Error Boundary to catch Solana-specific crashes
 import React from 'react';
-class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean}> {
-  constructor(props: any) { super(props); this.state = { hasError: false }; }
-  static getDerivedStateFromError() { return { hasError: true }; }
+class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean, error: any, errorInfo: any}> {
+  constructor(props: any) { 
+    super(props); 
+    this.state = { hasError: false, error: null, errorInfo: null }; 
+  }
+  componentDidCatch(error: any, errorInfo: any) {
+    this.setState({ hasError: true, error, errorInfo });
+    console.error("Critical App Error:", error, errorInfo);
+  }
   render() {
     if (this.state.hasError) {
       return (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', padding: 40, textAlign: 'center' }}>
           <AlertCircle size={48} color="#ef4444" style={{ marginBottom: 20 }} />
           <h2 style={{ marginBottom: 12 }}>Initialization Failed</h2>
-          <p style={{ color: 'var(--text-secondary)', maxWidth: 400, marginBottom: 24 }}>
-            The Solana environment could not be initialized. This is often due to missing wallet polyfills or a connection issue.
+          <p style={{ color: 'var(--text-secondary)', maxWidth: 600, marginBottom: 12 }}>
+            The Solana environment could not be initialized. 
           </p>
+          <div style={{ background: 'rgba(0,0,0,0.3)', padding: 16, borderRadius: 8, textAlign: 'left', marginBottom: 24, width: '100%', maxWidth: 800, overflow: 'auto' }}>
+            <p style={{ color: '#ef4444', fontSize: '0.75rem', fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+              {this.state.error?.toString()}
+              {"\n\n"}
+              {this.state.errorInfo?.componentStack}
+            </p>
+          </div>
           <button onClick={() => window.location.reload()} className="btn-primary">Retry Connection</button>
         </div>
       );

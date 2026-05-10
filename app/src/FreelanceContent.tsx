@@ -1,13 +1,13 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Buffer } from 'buffer';
-window.Buffer = window.Buffer || Buffer;
+window.Buffer = (window as any).Buffer || Buffer;
 
 import { useWallet, useAnchorWallet, useConnection } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, SystemProgram } from '@solana/web3.js';
 import * as anchor from '@coral-xyz/anchor';
-import { 
-  TOKEN_PROGRAM_ID, 
+import {
+  TOKEN_PROGRAM_ID,
   getAssociatedTokenAddressSync,
   createInitializeMintInstruction,
   MINT_SIZE,
@@ -16,7 +16,7 @@ import {
 } from '@solana/spl-token';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Lock, RefreshCw, Layers, Briefcase, PlusCircle, Check, Coins, Wand2, Shield
+  Lock, RefreshCw, Layers, Briefcase, PlusCircle, Check, Coins, Wand2, Shield, User
 } from 'lucide-react';
 
 import idl from './trustlayer.json';
@@ -37,8 +37,19 @@ export function FreelanceContent({ toast }: { toast: any }) {
   const [fetching, setFetching] = useState(false);
   const [processing, setProcessing] = useState<string | null>(null);
   const [tokenBalance, setTokenBalance] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'client' | 'freelancer' | 'market'>('client');
+  const [activeTab, setActiveTab] = useState<'client' | 'freelancer' | 'market' | 'arbitration'>('client');
   const [viewMode, setViewMode] = useState<'hire' | 'work'>('hire');
+  const [milestones, setMilestones] = useState<{ amount: string }[]>([]);
+  const [applications, setApplications] = useState<any[]>([]);
+  const [viewingAppsFor, setViewingAppsFor] = useState<string | null>(null);
+  const [applyingFor, setApplyingFor] = useState<string | null>(null);
+  const [applyMessage, setApplyMessage] = useState('');
+  const [updateMsg, setUpdateMsg] = useState<{ [key: string]: string }>({});
+  const [disputeSplit, setDisputeSplit] = useState<{ [key: string]: string }>({});
+  const [userProfile, setUserProfile] = useState<any>(null);
+  const [isProfileLoading, setIsProfileLoading] = useState(true);
+  const [setupUsername, setSetupUsername] = useState('');
+  const [setupBio, setSetupBio] = useState('');
 
   const program = useMemo(() => {
     const wallet = anchorWallet || (publicKey && signTransaction && signAllTransactions
@@ -62,12 +73,14 @@ export function FreelanceContent({ toast }: { toast: any }) {
 
     setFetching(true);
     try {
-      // Filter for accounts that match our new v2 size (762 bytes)
-      // This prevents the "buffer beyond length" error by ignoring old v1 accounts
       const allJobs = await program.account.jobEscrow.all([
-        { dataSize: 762 } 
+        { dataSize: 1022 }
       ]);
       setJobs(allJobs);
+
+      const allApps = await program.account.jobApplication.all();
+      setApplications(allApps);
+
       setLastFetch(Date.now());
     } catch (err: any) {
       if (err?.message?.includes('429')) {
@@ -75,16 +88,55 @@ export function FreelanceContent({ toast }: { toast: any }) {
       } else {
         toast.show('Failed to fetch jobs: ' + (err?.message || err), 'error');
       }
-    } finally { 
-      setFetching(false); 
+    } finally {
+      setFetching(false);
     }
   }, [program, fetching, lastFetch, toast.show]);
 
-  useEffect(() => { 
-    if (program) {
-      fetchJobs(); 
+  // Background polling to keep status in sync
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!fetching) fetchJobs();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [fetchJobs, fetching]);
+
+  const fetchProfile = useCallback(async () => {
+    if (!program || !publicKey) return;
+    try {
+      const [profilePDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('user_profile'), publicKey.toBuffer()],
+        program.programId
+      );
+      const profile = await program.account.userProfile.fetch(profilePDA);
+      setUserProfile(profile);
+    } catch (err) {
+      console.log("No profile found for user");
+      setUserProfile(null);
+    } finally {
+      setIsProfileLoading(false);
     }
-  }, [program]);
+  }, [program, publicKey]);
+
+  useEffect(() => {
+    if (program && publicKey) {
+      fetchJobs();
+      fetchBalance();
+      fetchProfile();
+    } else {
+      setJobs([]);
+      setTokenBalance(null);
+      setUserProfile(null);
+    }
+  }, [publicKey, program, fetchProfile]); // Auto-refresh everything when wallet changes
+
+  const formatAmount = (amt: any, decs: number = 0) => {
+    if (!amt) return "0.00";
+    const val = typeof amt === 'string' ? amt : amt.toString();
+    if (decs === 0) return val;
+    const num = Number(val) / Math.pow(10, decs);
+    return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+  };
 
   const fetchBalance = useCallback(async () => {
     if (!connection || !publicKey || !mint) {
@@ -129,7 +181,7 @@ export function FreelanceContent({ toast }: { toast: any }) {
 
       const signature = await sendTransaction(transaction, connection, { signers: [mintKeypair] });
       await connection.confirmTransaction(signature, 'confirmed');
-      
+
       setMint(mintKeypair.publicKey.toString());
       toast.show('Test Mint created & 1000 tokens minted!', 'success');
     } catch (err: any) {
@@ -147,19 +199,36 @@ export function FreelanceContent({ toast }: { toast: any }) {
       const mintPK = new PublicKey(mint);
       const arbiterPK = new PublicKey('11111111111111111111111111111111'); // Hardcoded arbiter for demo
       const jobId = new anchor.BN(Date.now()); // Generate unique ID
-      
+
       const [jobPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('job_v2'), publicKey.toBuffer(), jobId.toArrayLike(Buffer, 'le', 8)], 
+        [Buffer.from('job_v3'), publicKey.toBuffer(), jobId.toArrayLike(Buffer, 'le', 8)],
         program.programId
       );
       const [vaultPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('vault'), jobPDA.toBuffer()], 
+        [Buffer.from('vault'), jobPDA.toBuffer()],
         program.programId
       );
 
       const clientTA = getAssociatedTokenAddressSync(mintPK, publicKey);
 
-      await program.methods.initializeJob(jobId, new anchor.BN(amount), arbiterPK, title, description)
+      const mintInfo = await connection.getParsedAccountInfo(mintPK);
+      const decimals = (mintInfo.value?.data as any)?.parsed?.info?.decimals || 0;
+
+      const milestoneAmounts = milestones.length > 0
+        ? milestones.map(m => new anchor.BN(Number(m.amount) * Math.pow(10, decimals)))
+        : [];
+
+      const totalAmount = new anchor.BN(Number(amount) * Math.pow(10, decimals));
+
+      await program.methods.initializeJob(
+        jobId,
+        totalAmount,
+        arbiterPK,
+        title,
+        description,
+        milestoneAmounts,
+        decimals
+      )
         .accounts({
           client: publicKey,
           mint: mintPK,
@@ -169,7 +238,7 @@ export function FreelanceContent({ toast }: { toast: any }) {
         } as any).rpc();
 
       toast.show('Job created successfully!', 'success');
-      setAmount(''); setMint(''); setTitle(''); setDescription('');
+      setAmount(''); setMint(''); setTitle(''); setDescription(''); setMilestones([]);
       fetchJobs();
       fetchBalance();
     } catch (err: any) {
@@ -183,7 +252,30 @@ export function FreelanceContent({ toast }: { toast: any }) {
     } finally { setLoading(false); }
   };
 
-  const handleAction = async (job: any, action: string) => {
+  const handleInitializeProfile = async (username: string, bio: string) => {
+    if (!program || !publicKey) return;
+    setLoading(true);
+    try {
+      const [profilePDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('user_profile'), publicKey.toBuffer()],
+        program.programId
+      );
+      await program.methods.initializeProfile(username, bio)
+        .accounts({
+          user: publicKey,
+          profile: profilePDA,
+          systemProgram: SystemProgram.programId,
+        } as any).rpc();
+      toast.show('Profile created!', 'success');
+      fetchProfile();
+    } catch (err: any) {
+      toast.show('Failed to create profile: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAction = async (job: any, action: string, arg?: any) => {
     if (!program || !publicKey) return;
     const id = job.publicKey.toString();
     setProcessing(id);
@@ -194,37 +286,116 @@ export function FreelanceContent({ toast }: { toast: any }) {
       const jobId = jobAccount.jobId;
 
       const [jobPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('job_v2'), clientPK.toBuffer(), jobId.toArrayLike(Buffer, 'le', 8)], 
+        [Buffer.from('job_v3'), clientPK.toBuffer(), jobId.toArrayLike(Buffer, 'le', 8)],
         program.programId
       );
       const [vaultPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('vault'), jobPDA.toBuffer()], 
+        [Buffer.from('vault'), jobPDA.toBuffer()],
         program.programId
       );
 
-      if (action === 'accept') {
-        await program.methods.acceptJob()
-          .accounts({ freelancer: publicKey, job: jobPDA } as any).rpc();
-        toast.show('Job accepted!', 'success');
+      if (action === 'apply') {
+        const message = arg as string;
+        if (!message) return;
+
+        const [appPDA] = PublicKey.findProgramAddressSync(
+          [Buffer.from('application'), job.publicKey.toBuffer(), publicKey.toBuffer()],
+          program.programId
+        );
+
+        await program.methods.applyForJob(message)
+          .accounts({
+            freelancer: publicKey,
+            job: job.publicKey,
+            application: appPDA,
+          } as any).rpc();
+        toast.show('Application sent!', 'success');
+        setApplyingFor(null);
+        setApplyMessage('');
+      } else if (action === 'hire') {
+        const app = arg as any;
+        await program.methods.hireFreelancer()
+          .accounts({
+            client: publicKey,
+            job: job.publicKey,
+            application: app.publicKey,
+          } as any).rpc();
+        toast.show('Freelancer hired!', 'success');
+        setViewingAppsFor(null);
       } else if (action === 'submit') {
-        await program.methods.submitWork()
+        const link = prompt("Please provide a link to your work (e.g. GitHub, Google Drive):");
+        if (!link) { setProcessing(null); return; }
+        await program.methods.submitWork(link)
           .accounts({ freelancer: publicKey, job: jobPDA } as any).rpc();
         toast.show('Work submitted for review!', 'success');
-      } else if (action === 'approve') {
-        const freelancerTA = getAssociatedTokenAddressSync(mintPK, jobAccount.freelancer);
-        await program.methods.approveAndRelease()
-          .accounts({ 
-            client: publicKey, freelancer: jobAccount.freelancer, job: jobPDA, 
-            mint: mintPK, freelancerTokenAccount: freelancerTA, vault: vaultPDA 
+      } else if (action === 'release_milestone') {
+        const milestoneIdx = arg as number;
+        const freelancerPK = jobAccount.freelancer;
+        const [freelancerProfilePDA] = PublicKey.findProgramAddressSync(
+          [Buffer.from('user_profile'), freelancerPK.toBuffer()],
+          program.programId
+        );
+        const freelancerTA = getAssociatedTokenAddressSync(mintPK, freelancerPK);
+        await program.methods.releaseMilestone(milestoneIdx)
+          .accounts({
+            client: publicKey, freelancer: freelancerPK, job: jobPDA,
+            mint: mintPK, freelancerTokenAccount: freelancerTA, vault: vaultPDA,
+            freelancerProfile: freelancerProfilePDA
           } as any).rpc();
-        toast.show('Payment released!', 'success');
+        toast.show('Milestone payment released!', 'success');
+      } else if (action === 'post_update') {
+        const updateText = arg as string;
+        const timestamp = Math.floor(Date.now() / 1000);
+        const [logPDA] = PublicKey.findProgramAddressSync(
+          [Buffer.from('log'), jobPDA.toBuffer(), publicKey.toBuffer(), new anchor.BN(timestamp).toArrayLike(Buffer, 'le', 8)],
+          program.programId
+        );
+        await program.methods.postProjectUpdate(updateText, new anchor.BN(timestamp))
+          .accounts({
+            author: publicKey, job: jobPDA, log: logPDA,
+            systemProgram: SystemProgram.programId
+          } as any).rpc();
+        toast.show('Update posted to chain!', 'success');
+      } else if (action === 'approve') {
+        const freelancerPK = jobAccount.freelancer;
+        const [freelancerProfilePDA] = PublicKey.findProgramAddressSync(
+          [Buffer.from('user_profile'), freelancerPK.toBuffer()],
+          program.programId
+        );
+        const freelancerTA = getAssociatedTokenAddressSync(mintPK, freelancerPK);
+        await program.methods.approveAndRelease()
+          .accounts({
+            client: publicKey, freelancer: freelancerPK, job: jobPDA,
+            mint: mintPK, freelancerTokenAccount: freelancerTA, vault: vaultPDA,
+            freelancerProfile: freelancerProfilePDA
+          } as any).rpc();
+        toast.show('Payment released and reputation updated!', 'success');
+      } else if (action === 'dispute') {
+        await program.methods.dispute().accounts({ user: publicKey, job: jobPDA }).rpc();
+        toast.show('Dispute initiated. Funds locked for Arbiter review.', 'info');
+      } else if (action === 'resolve_dispute') {
+        const { freelancerAward, clientAward } = arg as { freelancerAward: number, clientAward: number };
+        const freelancerPK = jobAccount.freelancer;
+        const clientPK = jobAccount.client;
+        const [freelancerProfilePDA] = PublicKey.findProgramAddressSync([Buffer.from('user_profile'), freelancerPK.toBuffer()], program.programId);
+        const freelancerTA = getAssociatedTokenAddressSync(mintPK, freelancerPK);
+        const clientTA = getAssociatedTokenAddressSync(mintPK, clientPK);
+        
+        await program.methods.resolveDispute(new anchor.BN(freelancerAward), new anchor.BN(clientAward))
+          .accounts({
+            arbiter: publicKey, client: clientPK, freelancer: freelancerPK,
+            job: jobPDA, mint: mintPK, freelancerTokenAccount: freelancerTA,
+            clientTokenAccount: clientTA, vault: vaultPDA, freelancerProfile: freelancerProfilePDA,
+            tokenProgram: TOKEN_PROGRAM_ID
+          } as any).rpc();
+        toast.show('Dispute settled and funds distributed!', 'success');
       } else if (action === 'cancel') {
         const clientTA = getAssociatedTokenAddressSync(mintPK, publicKey);
         await program.methods.cancelJob()
           .accounts({ client: publicKey, job: jobPDA, mint: mintPK, clientTokenAccount: clientTA, vault: vaultPDA } as any).rpc();
         toast.show('Job cancelled & refunded!', 'success');
       }
-      
+
       fetchJobs();
     } catch (err: any) {
       toast.show(action + ' failed: ' + (err?.message || err), 'error');
@@ -233,11 +404,12 @@ export function FreelanceContent({ toast }: { toast: any }) {
 
   const myClientJobs = jobs.filter(j => j.account.client.toString() === publicKey?.toString());
   const myFreelancerJobs = jobs.filter(j => j.account.freelancer.toString() === publicKey?.toString());
+  const myArbiterJobs = jobs.filter(j => j.account.arbiter.toString() === publicKey?.toString() && Object.keys(j.account.status)[0] === 'disputed');
   const openJobs = jobs.filter(j => Object.keys(j.account.status)[0] === 'open' && j.account.client.toString() !== publicKey?.toString());
 
   const renderStatus = (statusObj: any) => {
     const status = Object.keys(statusObj)[0];
-    const map: Record<string, {label: string, color: string}> = {
+    const map: Record<string, { label: string, color: string }> = {
       open: { label: 'Open', color: 'var(--primary-light)' },
       inProgress: { label: 'In Progress', color: 'var(--accent)' },
       inReview: { label: 'In Review', color: '#fbbf24' },
@@ -250,246 +422,555 @@ export function FreelanceContent({ toast }: { toast: any }) {
   };
 
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 24px', paddingBottom: 60 }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '28px 0 48px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div style={{ width: 44, height: 44, borderRadius: 14, background: 'linear-gradient(135deg, #9945FF, #7c2de0)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Briefcase size={22} color="white" />
-          </div>
-          <div>
-            <h1 style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1 }}>
-              Trust<span className="gradient-text">Layer</span> Gigs
-            </h1>
-            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 2 }}>
-              Freelance Escrow Dashboard
-            </p>
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {/* Role Toggle Switch */}
-          <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', padding: 4, borderRadius: 12, border: '1px solid var(--border)', marginRight: 10 }}>
-            <button 
-              onClick={() => { setViewMode('hire'); setActiveTab('client'); }}
-              style={{ 
-                padding: '6px 16px', borderRadius: 8, border: 'none', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer',
-                background: viewMode === 'hire' ? 'var(--primary-light)' : 'transparent',
-                color: viewMode === 'hire' ? 'white' : 'var(--text-muted)',
-                transition: 'all 0.2s'
-              }}
-            >
-              I want to Hire
-            </button>
-            <button 
-              onClick={() => { setViewMode('work'); setActiveTab('market'); }}
-              style={{ 
-                padding: '6px 16px', borderRadius: 8, border: 'none', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer',
-                background: viewMode === 'work' ? 'var(--secondary)' : 'transparent',
-                color: viewMode === 'work' ? 'white' : 'var(--text-muted)',
-                transition: 'all 0.2s'
-              }}
-            >
-              I want to Work
-            </button>
-          </div>
-
-          {program && (
-            <button onClick={fetchJobs} disabled={fetching} className="btn-ghost" title="Refresh jobs" style={{ padding: '8px 10px' }}>
-              <RefreshCw size={15} className={fetching ? 'spin' : ''} />
-            </button>
-          )}
-          <WalletMultiButton />
-        </div>
-      </header>
-
-      {program && (
-        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 36 }}>
-          {[
-            { label: 'Available Gigs', value: openJobs.length, color: 'var(--primary-light)' },
-            { label: 'Hiring (Client)', value: myClientJobs.length, color: 'var(--secondary)' },
-            { label: 'Working (Freelancer)', value: myFreelancerJobs.length, color: 'var(--accent)' },
-          ].map(s => (
-            <div key={s.label} className="stat-card">
-              <p style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: 6 }}>{s.label}</p>
-              <p style={{ fontSize: '1.8rem', fontWeight: 800, color: s.color, letterSpacing: '-0.04em', lineHeight: 1 }}>{s.value}</p>
+    <>
+      <div className="mesh-bg" />
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 24px', paddingBottom: 60, position: 'relative' }}>
+        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '32px 0 56px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{ width: 44, height: 44, borderRadius: 14, background: 'linear-gradient(135deg, #7B3FE4, #10B981)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Briefcase size={22} color="white" />
             </div>
-          ))}
-        </motion.div>
-      )}
-
-      <div style={{ display: 'grid', gridTemplateColumns: viewMode === 'hire' ? '380px 1fr' : '1fr', gap: 32 }}>
-        {/* LEFT: Action Panel (Only in Hire mode) */}
-        {viewMode === 'hire' && (
-          <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.4 }} className="glass" style={{ padding: 28, height: 'fit-content', position: 'sticky', top: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(153,69,255,0.12)', border: '1px solid rgba(153,69,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <PlusCircle size={16} color="var(--primary-light)" />
-              </div>
-              <div>
-                <h2 style={{ fontSize: '1rem', fontWeight: 700, letterSpacing: '-0.02em' }}>Post a Gig</h2>
-                <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Fund a new freelance job escrow</p>
-              </div>
+            <div>
+              <h1 style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1 }}>
+                Trust<span className="gradient-text">Layer</span> Gigs
+              </h1>
+              <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 2 }}>
+                Freelance Escrow Dashboard
+              </p>
             </div>
-            <div style={{ height: 1, background: 'var(--border)', margin: '18px 0' }} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {/* Role Toggle Switch */}
+            <div style={{ display: 'flex', background: 'rgba(255,255,255,0.03)', padding: 4, borderRadius: 12, border: '1px solid var(--border)', marginRight: 10 }}>
+              <button
+                onClick={() => { setViewMode('hire'); setActiveTab('client'); }}
+                style={{
+                  padding: '6px 16px', borderRadius: 8, border: 'none', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer',
+                  background: viewMode === 'hire' ? 'var(--solana-purple)' : 'transparent',
+                  color: 'white',
+                  transition: 'all 0.2s'
+                }}
+              >
+                I want to Hire
+              </button>
+              <button
+                onClick={() => { setViewMode('work'); setActiveTab('market'); }}
+                style={{
+                  padding: '6px 16px', borderRadius: 8, border: 'none', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer',
+                  background: viewMode === 'work' ? 'var(--solana-green)' : 'transparent',
+                  color: 'white',
+                  transition: 'all 0.2s'
+                }}
+              >
+                I want to Work
+              </button>
+            </div>
 
-            {!publicKey ? (
-              <div style={{ padding: '32px 16px', textAlign: 'center' }}>
-                <Lock size={32} color="var(--text-muted)" style={{ margin: '0 auto 12px', opacity: 0.3, display: 'block' }} />
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Connect your wallet to post a gig.</p>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-                <div>
-                  <label className="label">Job Title</label>
-                  <input type="text" placeholder="e.g. Design a Logo" value={title} onChange={e => setTitle(e.target.value)} />
+            {program && userProfile && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginRight: 16, borderRight: '1px solid var(--border)', paddingRight: 16 }}>
+                <div style={{ textAlign: 'right' }}>
+                  <p style={{ fontSize: '0.85rem', fontWeight: 700, color: 'white' }}>{userProfile.username}</p>
+                  <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{userProfile.jobsCompleted} Jobs · {userProfile.totalEarned.toString()} Earned</p>
                 </div>
-                <div>
-                  <label className="label">Description / Requirements</label>
-                  <textarea 
-                    placeholder="Describe what needs to be done..." 
-                    value={description} 
-                    onChange={e => setDescription(e.target.value)} 
-                    style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 10, padding: 12, color: 'white', fontSize: '0.85rem', minHeight: 80, outline: 'none' }}
-                  />
+                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', fontWeight: 800 }}>
+                  {userProfile.username[0].toUpperCase()}
                 </div>
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <label className="label" style={{ marginBottom: 0 }}>Payment Token Mint</label>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      {tokenBalance !== null && (
-                        <div style={{ fontSize: '0.65rem', color: 'var(--secondary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <Coins size={10} /> Bal: {tokenBalance}
-                        </div>
-                      )}
-                      <button onClick={handleCreateTestMint} disabled={minting} className="btn-ghost" style={{ fontSize: '0.65rem', padding: '2px 8px', height: 'auto', gap: 4 }}>
-                        {minting ? <RefreshCw size={10} className="spin" /> : <Wand2 size={10} />}
-                        Auto-Setup
-                      </button>
-                    </div>
-                  </div>
-                  <input type="text" placeholder="USDC Mint Address..." value={mint} onChange={e => setMint(e.target.value)} className="mono" />
-                </div>
-                <div>
-                  <label className="label">Budget Amount</label>
-                  <input type="number" placeholder="0" value={amount} onChange={e => setAmount(e.target.value)} min="0" />
-                </div>
-                <button onClick={handleCreateJob} disabled={loading || !program} className="btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '14px' }}>
-                  {loading ? <RefreshCw size={16} className="spin" /> : <Lock size={16} />}
-                  {loading ? 'Funding Escrow…' : !program ? 'Awaiting wallet…' : 'Fund Job'}
-                </button>
               </div>
             )}
+
+            {program && (
+              <button onClick={fetchJobs} disabled={fetching} className="btn-ghost" title="Refresh jobs" style={{ padding: '8px 10px' }}>
+                <RefreshCw size={15} className={fetching ? 'spin' : ''} />
+              </button>
+            )}
+            <WalletMultiButton />
+          </div>
+        </header>
+
+        {program && (
+          <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 36 }}>
+            {[
+              { label: 'Available Gigs', value: openJobs.length, color: 'var(--primary-light)' },
+              { label: 'Hiring (Client)', value: myClientJobs.length, color: 'var(--secondary)' },
+              { label: 'Working (Freelancer)', value: myFreelancerJobs.length, color: 'var(--accent)' },
+            ].map(s => (
+              <div key={s.label} className="stat-card">
+                <p style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: 6 }}>{s.label}</p>
+                <p style={{ fontSize: '1.8rem', fontWeight: 800, color: s.color, letterSpacing: '-0.04em', lineHeight: 1 }}>{s.value}</p>
+              </div>
+            ))}
           </motion.div>
         )}
 
-        {/* RIGHT: Jobs List */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.1 }} className="glass" style={{ padding: 28 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(20,241,149,0.1)', border: '1px solid rgba(20,241,149,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Layers size={16} color="var(--secondary)" />
-            </div>
-            <div>
-              <h2 style={{ fontSize: '1rem', fontWeight: 700, letterSpacing: '-0.02em' }}>Job Contracts</h2>
-              <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Active escrows on-chain</p>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 20, marginBottom: 20, borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
-            {viewMode === 'hire' ? (
-              <button onClick={() => setActiveTab('client')} style={{ background: 'none', border: 'none', color: activeTab === 'client' ? 'var(--primary-light)' : 'var(--text-muted)', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', position: 'relative', padding: '4px 8px' }}>
-                My Active Contracts {myClientJobs.length > 0 && <span style={{ marginLeft: 6, opacity: 0.6 }}>({myClientJobs.length})</span>}
-                {activeTab === 'client' && <motion.div layoutId="tab" style={{ position: 'absolute', bottom: -11, left: 0, right: 0, height: 2, background: 'var(--primary-light)' }} />}
-              </button>
-            ) : (
-              <>
-                <button onClick={() => setActiveTab('market')} style={{ background: 'none', border: 'none', color: activeTab === 'market' ? 'var(--secondary)' : 'var(--text-muted)', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', position: 'relative', padding: '4px 8px' }}>
-                  Available Gigs {openJobs.length > 0 && <span style={{ marginLeft: 6, opacity: 0.6 }}>({openJobs.length})</span>}
-                  {activeTab === 'market' && <motion.div layoutId="tab" style={{ position: 'absolute', bottom: -11, left: 0, right: 0, height: 2, background: 'var(--secondary)' }} />}
-                </button>
-                <button onClick={() => setActiveTab('freelancer')} style={{ background: 'none', border: 'none', color: activeTab === 'freelancer' ? 'var(--primary-light)' : 'var(--text-muted)', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', position: 'relative', padding: '4px 8px' }}>
-                  My Gigs {myFreelancerJobs.length > 0 && <span style={{ marginLeft: 6, opacity: 0.6 }}>({myFreelancerJobs.length})</span>}
-                  {activeTab === 'freelancer' && <motion.div layoutId="tab" style={{ position: 'absolute', bottom: -11, left: 0, right: 0, height: 2, background: 'var(--primary-light)' }} />}
-                </button>
-              </>
-            )}
-          </div>
+        {program && !userProfile && !isProfileLoading && publicKey && (
+          <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="glass" style={{ padding: 24, marginBottom: 32, border: '1px solid var(--secondary)', background: 'linear-gradient(135deg, rgba(20,241,149,0.05), rgba(0,0,0,0))' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 4 }}>Complete Your Profile</h3>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 20 }}>Set a username to build your reputation on TrustLayer.</p>
 
-          {program && (
-            <AnimatePresence mode="wait">
-              {fetching && jobs.length === 0 ? (
-                <div className="empty-state" key="loading"><RefreshCw size={32} className="spin" style={{ opacity: 0.3 }} /><p>Scanning Devnet...</p></div>
-              ) : (
-                <motion.div key={activeTab} initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }}>
-                  {activeTab === 'client' && myClientJobs.length === 0 && <div className="empty-state"><PlusCircle size={32} style={{ opacity: 0.3 }} /><p>You haven't created any jobs yet.<br/><span style={{ fontSize: '0.7rem' }}>Use the form on the left to start.</span></p></div>}
-                  {activeTab === 'freelancer' && myFreelancerJobs.length === 0 && <div className="empty-state"><Briefcase size={32} style={{ opacity: 0.3 }} /><p>You haven't accepted any gigs yet.</p></div>}
-                  {activeTab === 'market' && openJobs.length === 0 && <div className="empty-state"><Layers size={32} style={{ opacity: 0.3 }} /><p>No open gigs available at the moment.<br/><span style={{ fontSize: '0.7rem' }}>Try creating one with a different wallet!</span></p></div>}
-                  
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
-                    {(activeTab === 'client' ? myClientJobs : activeTab === 'freelancer' ? myFreelancerJobs : openJobs).map(job => {
-                      const isClient = job.account.client.toString() === publicKey?.toString();
-                      const isFreelancer = job.account.freelancer.toString() === publicKey?.toString();
-                      const status = Object.keys(job.account.status)[0];
-                      const pid = job.publicKey.toString();
-                      const isProc = processing === pid;
-
-                      return (
-                        <motion.div key={pid} initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="escrow-card">
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                            <span style={{ fontFamily: 'monospace', fontSize: '0.72rem', color: 'var(--text-muted)' }}>ID: {job.account.jobId.toString()}</span>
-                            {renderStatus(job.account.status)}
-                          </div>
-
-                          <div style={{ marginBottom: 14 }}>
-                            <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 4 }}>{job.account.title || 'Untitled Job'}</h3>
-                            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                              {job.account.description || 'No description provided.'}
-                            </p>
-                          </div>
-
-                          <div style={{ background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '8px', marginBottom: '14px', border: '1px solid var(--border)' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                              <p style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Payout</p>
-                              <p style={{ fontSize: '0.6rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }} title={job.account.arbiter.toString()}>
-                                <Shield size={10} /> Arbiter: {job.account.arbiter.toString().substring(0, 4)}...
-                              </p>
-                            </div>
-                            <p style={{ fontWeight: 700, fontSize: '1.2rem', color: 'var(--primary-light)' }}>{job.account.amount.toString()} Tokens</p>
-                          </div>
-
-                          {/* Actions */}
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            {isClient && status === 'open' && (
-                              <button onClick={() => handleAction(job, 'cancel')} disabled={!!processing} className="btn-danger" style={{ justifyContent: 'center' }}>
-                                {isProc ? <RefreshCw size={14} className="spin" /> : 'Cancel & Refund'}
-                              </button>
-                            )}
-                            {isClient && status === 'inReview' && (
-                              <button onClick={() => handleAction(job, 'approve')} disabled={!!processing} className="btn-success" style={{ justifyContent: 'center' }}>
-                                {isProc ? <RefreshCw size={14} className="spin" /> : <Check size={14} />} Approve & Pay
-                              </button>
-                            )}
-                            {!isClient && !isFreelancer && status === 'open' && (
-                              <button onClick={() => handleAction(job, 'accept')} disabled={!!processing} className="btn-primary" style={{ justifyContent: 'center' }}>
-                                {isProc ? <RefreshCw size={14} className="spin" /> : 'Accept Job'}
-                              </button>
-                            )}
-                            {isFreelancer && status === 'inProgress' && (
-                              <button onClick={() => handleAction(job, 'submit')} disabled={!!processing} className="btn-primary" style={{ justifyContent: 'center' }}>
-                                {isProc ? <RefreshCw size={14} className="spin" /> : 'Submit Work'}
-                              </button>
-                            )}
-                          </div>
-                        </motion.div>
-                      );
-                    })}
+                <div style={{ display: 'flex', gap: 12, maxWidth: 600 }}>
+                  <div style={{ flex: 1 }}>
+                    <label className="label">Username</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. SolanaMaster"
+                      value={setupUsername}
+                      onChange={(e) => setSetupUsername(e.target.value)}
+                      style={{ background: 'rgba(0,0,0,0.2)' }}
+                    />
                   </div>
-                </motion.div>
+                  <div style={{ flex: 2 }}>
+                    <label className="label">Short Bio</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Senior Smart Contract Developer"
+                      value={setupBio}
+                      onChange={(e) => setSetupBio(e.target.value)}
+                      style={{ background: 'rgba(0,0,0,0.2)' }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                    <button
+                      onClick={() => {
+                        if (setupUsername && setupBio) handleInitializeProfile(setupUsername, setupBio);
+                      }}
+                      disabled={!setupUsername || !setupBio || loading}
+                      className="btn-primary"
+                      style={{ background: 'var(--secondary)', height: 42 }}
+                    >
+                      {loading ? <RefreshCw size={14} className="spin" /> : 'Create Profile'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div style={{ width: 48, height: 48, borderRadius: 12, background: 'rgba(20,241,149,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <User size={24} color="var(--secondary)" />
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: viewMode === 'hire' ? '350px 1fr' : '1fr', gap: 24, alignItems: 'start' }}>
+          {/* LEFT: Action Panel (Only in Hire mode) */}
+          {viewMode === 'hire' && (
+            <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.4 }} className="glass" style={{ padding: 24, position: 'sticky', top: 24 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg, rgba(110, 53, 201, 0.15), rgba(16, 185, 129, 0.15))', border: '1px solid rgba(110, 53, 201, 0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <PlusCircle size={16} color="#A78BFA" />
+                </div>
+                <div>
+                  <h2 style={{ fontSize: '1rem', fontWeight: 700, letterSpacing: '-0.02em' }}>Post a Gig</h2>
+                  <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Fund a new freelance job escrow</p>
+                </div>
+              </div>
+              <div style={{ height: 1, background: 'var(--border)', margin: '18px 0' }} />
+
+              {!publicKey ? (
+                <div style={{ padding: '32px 16px', textAlign: 'center' }}>
+                  <Lock size={32} color="var(--text-muted)" style={{ margin: '0 auto 12px', opacity: 0.3, display: 'block' }} />
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Connect your wallet to post a gig.</p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                  <div>
+                    <label className="label">Job Title</label>
+                    <input type="text" placeholder="e.g. Design a Logo" value={title} onChange={e => setTitle(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label">Description / Requirements</label>
+                    <textarea
+                      placeholder="Describe what needs to be done..."
+                      value={description}
+                      onChange={e => setDescription(e.target.value)}
+                      style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 10, padding: 12, color: 'white', fontSize: '0.85rem', minHeight: 80, outline: 'none' }}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <label className="label" style={{ marginBottom: 0 }}>Payment Token Mint</label>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        {tokenBalance !== null && (
+                          <div style={{ fontSize: '0.65rem', color: 'var(--secondary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <Coins size={10} /> Bal: {tokenBalance}
+                          </div>
+                        )}
+                        <button onClick={handleCreateTestMint} disabled={minting} className="btn-ghost" style={{ fontSize: '0.65rem', padding: '2px 8px', height: 'auto', gap: 4 }}>
+                          {minting ? <RefreshCw size={10} className="spin" /> : <Wand2 size={10} />}
+                          Auto-Setup
+                        </button>
+                      </div>
+                    </div>
+                    <input type="text" placeholder="USDC Mint Address..." value={mint} onChange={e => setMint(e.target.value)} className="mono" />
+                  </div>
+                  <div>
+                    <label className="label">Budget Amount</label>
+                    <input type="number" placeholder="0" value={amount} onChange={e => setAmount(e.target.value)} min="0" />
+                  </div>
+
+                  {/* Milestone Builder */}
+                  <div style={{ background: 'rgba(0,0,0,0.1)', padding: 12, borderRadius: 10, border: '1px dashed var(--border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <p style={{ fontSize: '0.75rem', fontWeight: 700 }}>Milestones (Optional)</p>
+                      <button
+                        onClick={() => {
+                          if (milestones.length < 5) setMilestones([...milestones, { amount: '' }]);
+                        }}
+                        className="btn-ghost"
+                        style={{ fontSize: '0.65rem', padding: '2px 8px', height: 'auto' }}
+                      >
+                        + Add Stage
+                      </button>
+                    </div>
+
+                    {milestones.map((m, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: '0 8px', border: '1px solid var(--border)' }}>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginRight: 8 }}>#{i + 1}</span>
+                          <input
+                            type="number"
+                            placeholder="Amount"
+                            value={m.amount}
+                            onChange={(e) => {
+                              const newM = [...milestones];
+                              newM[i].amount = e.target.value;
+                              setMilestones(newM);
+                            }}
+                            style={{ border: 'none', background: 'none', padding: '8px 0', fontSize: '0.8rem' }}
+                          />
+                        </div>
+                        <button
+                          onClick={() => setMilestones(milestones.filter((_, idx) => idx !== i))}
+                          className="btn-ghost"
+                          style={{ padding: 4, height: 'auto' }}
+                        >
+                          <RefreshCw size={12} style={{ transform: 'rotate(45deg)' }} />
+                        </button>
+                      </div>
+                    ))}
+
+                    {milestones.length > 0 && (
+                      <p style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 8 }}>
+                        Total of Milestones: {milestones.reduce((acc, m) => acc + (Number(m.amount) || 0), 0)}
+                      </p>
+                    )}
+                  </div>
+                  <button onClick={handleCreateJob} disabled={loading || !program} className="btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '14px' }}>
+                    {loading ? <RefreshCw size={16} className="spin" /> : <Lock size={16} />}
+                    {loading ? 'Funding Escrow…' : !program ? 'Awaiting wallet…' : 'Fund Job'}
+                  </button>
+                </div>
               )}
-            </AnimatePresence>
+            </motion.div>
           )}
-        </motion.div>
+
+          {/* RIGHT: Jobs List */}
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.1 }} className="glass" style={{ padding: 24 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(20,241,149,0.1)', border: '1px solid rgba(20,241,149,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Layers size={16} color="var(--secondary)" />
+              </div>
+              <div>
+                <h2 style={{ fontSize: '1rem', fontWeight: 700, letterSpacing: '-0.02em' }}>Job Contracts</h2>
+                <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Active escrows on-chain</p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 20, marginBottom: 20, borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
+              {viewMode === 'hire' ? (
+                <button onClick={() => setActiveTab('client')} style={{ background: 'none', border: 'none', color: activeTab === 'client' ? 'var(--primary-light)' : 'var(--text-muted)', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', position: 'relative', padding: '4px 8px' }}>
+                  My Active Contracts {myClientJobs.length > 0 && <span style={{ marginLeft: 6, opacity: 0.6 }}>({myClientJobs.length})</span>}
+                  {activeTab === 'client' && <motion.div layoutId="tab" style={{ position: 'absolute', bottom: -11, left: 0, right: 0, height: 2, background: 'var(--primary-light)' }} />}
+                </button>
+              ) : (
+                <>
+                  <button onClick={() => setActiveTab('market')} style={{ background: 'none', border: 'none', color: activeTab === 'market' ? 'var(--secondary)' : 'var(--text-muted)', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', position: 'relative', padding: '4px 8px' }}>
+                    Available Gigs {openJobs.length > 0 && <span style={{ marginLeft: 6, opacity: 0.6 }}>({openJobs.length})</span>}
+                    {activeTab === 'market' && <motion.div layoutId="tab" style={{ position: 'absolute', bottom: -11, left: 0, right: 0, height: 2, background: 'var(--secondary)' }} />}
+                  </button>
+                  <button onClick={() => setActiveTab('freelancer')} style={{ background: 'none', border: 'none', color: activeTab === 'freelancer' ? 'var(--primary-light)' : 'var(--text-muted)', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', position: 'relative', padding: '4px 8px' }}>
+                    My Gigs {myFreelancerJobs.length > 0 && <span style={{ marginLeft: 6, opacity: 0.6 }}>({myFreelancerJobs.length})</span>}
+                    {activeTab === 'freelancer' && <motion.div layoutId="tab" style={{ position: 'absolute', bottom: -11, left: 0, right: 0, height: 2, background: 'var(--primary-light)' }} />}
+                  </button>
+                  {myArbiterJobs.length > 0 && (
+                    <button onClick={() => setActiveTab('arbitration')} style={{ background: 'none', border: 'none', color: activeTab === 'arbitration' ? 'var(--accent)' : 'var(--text-muted)', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', position: 'relative', padding: '4px 8px' }}>
+                      Arbitration <span style={{ marginLeft: 6, color: '#ef4444' }}>({myArbiterJobs.length})</span>
+                      {activeTab === 'arbitration' && <motion.div layoutId="tab" style={{ position: 'absolute', bottom: -11, left: 0, right: 0, height: 2, background: 'var(--accent)' }} />}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+
+            {program && (
+              <AnimatePresence mode="wait">
+                {fetching && jobs.length === 0 ? (
+                  <div className="empty-state" key="loading"><RefreshCw size={32} className="spin" style={{ opacity: 0.3 }} /><p>Scanning Devnet...</p></div>
+                ) : (
+                  <motion.div key={activeTab} initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }}>
+                    {activeTab === 'client' && myClientJobs.length === 0 && <div className="empty-state"><PlusCircle size={32} style={{ opacity: 0.3 }} /><p>You haven't created any jobs yet.<br /><span style={{ fontSize: '0.7rem' }}>Use the form on the left to start.</span></p></div>}
+                    {activeTab === 'freelancer' && myFreelancerJobs.length === 0 && <div className="empty-state"><Briefcase size={32} style={{ opacity: 0.3 }} /><p>You haven't accepted any gigs yet.</p></div>}
+                    {activeTab === 'market' && openJobs.length === 0 && <div className="empty-state"><Layers size={32} style={{ opacity: 0.3 }} /><p>No open gigs available at the moment.<br /><span style={{ fontSize: '0.7rem' }}>Try creating one with a different wallet!</span></p></div>}
+                    {activeTab === 'arbitration' && myArbiterJobs.length === 0 && <div className="empty-state"><Shield size={32} style={{ opacity: 0.3 }} /><p>No active disputes to resolve.</p></div>}
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
+                      {(activeTab === 'client' ? myClientJobs : activeTab === 'freelancer' ? myFreelancerJobs : activeTab === 'arbitration' ? myArbiterJobs : openJobs).map(job => {
+                        const isClient = job.account.client.toString() === publicKey?.toString();
+                        const isFreelancer = job.account.freelancer.toString() === publicKey?.toString();
+                        const isArbiter = job.account.arbiter.toString() === publicKey?.toString();
+                        const status = Object.keys(job.account.status)[0];
+                        const pid = job.publicKey.toString();
+                        const isProc = processing === pid;
+
+                        return (
+                          <motion.div key={pid} initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="escrow-card">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                              <span style={{ fontFamily: 'monospace', fontSize: '0.72rem', color: 'var(--text-muted)' }}>ID: {job.account.jobId.toString()}</span>
+                              {renderStatus(job.account.status)}
+                            </div>
+
+                            <div style={{ marginBottom: 14 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                <p style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Posted By</p>
+                                <p style={{ fontSize: '0.65rem', color: 'white', fontFamily: 'monospace' }}>
+                                  {job.account.client.toString().substring(0, 4)}...{job.account.client.toString().slice(-4)}
+                                </p>
+                              </div>
+
+                              {status !== 'open' && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                  <p style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Freelancer</p>
+                                  <p style={{ fontSize: '0.65rem', color: 'var(--secondary)', fontFamily: 'monospace' }}>
+                                    {job.account.freelancer.toString().substring(0, 4)}...{job.account.freelancer.toString().slice(-4)}
+                                  </p>
+                                </div>
+                              )}
+
+                              <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 4, marginTop: 10 }}>{job.account.title || 'Untitled Job'}</h3>
+                              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', marginBottom: 8 }}>
+                                {job.account.description || 'No description provided.'}
+                              </p>
+
+                              {job.account.submissionLink && (
+                                <div style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)', padding: '8px 12px', borderRadius: 8, marginTop: 8 }}>
+                                  <p style={{ fontSize: '0.6rem', textTransform: 'uppercase', color: '#3b82f6', fontWeight: 700, marginBottom: 4 }}>Freelancer Submission</p>
+                                  <a href={job.account.submissionLink.startsWith('http') ? job.account.submissionLink : `https://${job.account.submissionLink}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.75rem', color: 'white', textDecoration: 'underline', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    View Work Link <PlusCircle size={10} style={{ transform: 'rotate(45deg)' }} />
+                                  </a>
+                                </div>
+                              )}
+                            </div>
+
+                            <div style={{ background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '8px', marginBottom: '14px', border: '1px solid var(--border)' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                <p style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Payout</p>
+                                <p style={{ fontSize: '0.6rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }} title={job.account.arbiter.toString()}>
+                                  <Shield size={10} /> Arbiter: {job.account.arbiter.toString().substring(0, 4)}...
+                                </p>
+                              </div>
+                              <p style={{ fontWeight: 700, fontSize: '1.2rem', color: 'var(--primary-light)' }}>
+                                {formatAmount(job.account.amount, job.account.decimals)} Tokens
+                              </p>
+
+                              {/* Milestone Progress Tracker */}
+                              {job.account.milestoneCount > 0 && (
+                                <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                                  <p style={{ fontSize: '0.6rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>Milestone Progress</p>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                    {job.account.milestoneAmounts.slice(0, job.account.milestoneCount).map((amt: any, idx: number) => {
+                                      const isReleased = job.account.milestoneStatus[idx] === 1;
+                                      return (
+                                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(0,0,0,0.1)', padding: '6px 8px', borderRadius: 6 }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: isReleased ? 'var(--secondary)' : 'var(--text-muted)' }} />
+                                            <span style={{ fontSize: '0.7rem', color: isReleased ? 'white' : 'var(--text-muted)' }}>
+                                              #{idx + 1}: {formatAmount(amt, job.account.decimals)}
+                                            </span>
+                                          </div>
+                                          {isClient && !isReleased && status !== 'completed' && (
+                                            <button
+                                              onClick={() => handleAction(job, 'release_milestone', idx)}
+                                              disabled={!!processing}
+                                              style={{ background: 'var(--secondary)', border: 'none', borderRadius: 4, padding: '2px 6px', color: 'white', fontSize: '0.6rem', cursor: 'pointer', opacity: 0.8 }}
+                                            >
+                                              {isProc ? '...' : 'Pay'}
+                                            </button>
+                                          )}
+                                          {isReleased && <Check size={10} color="var(--secondary)" />}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Actions */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                              {isClient && status === 'open' && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                  <button
+                                    onClick={() => setViewingAppsFor(viewingAppsFor === pid ? null : pid)}
+                                    className="btn-primary"
+                                    style={{ background: 'rgba(59,130,246,0.2)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.3)' }}
+                                  >
+                                    {applications.filter(a => a.account.job.toString() === pid).length} Applicants
+                                  </button>
+                                  <button onClick={() => handleAction(job, 'cancel')} disabled={!!processing} className="btn-danger" style={{ justifyContent: 'center' }}>
+                                    {isProc ? <RefreshCw size={14} className="spin" /> : 'Cancel & Refund'}
+                                  </button>
+
+                                  {viewingAppsFor === pid && (
+                                    <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                                      <p style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' }}>Review Bids</p>
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                        {applications.filter(a => a.account.job.toString() === pid).map(app => (
+                                          <div key={app.publicKey.toString()} style={{ background: 'rgba(255,255,255,0.02)', padding: 10, borderRadius: 8, border: '1px solid var(--border)' }}>
+                                            <p style={{ fontSize: '0.7rem', color: 'white', marginBottom: 4 }}>{app.account.message}</p>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                              <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>{app.account.freelancer.toString().substring(0, 4)}...</span>
+                                              <button
+                                                onClick={() => handleAction(job, 'hire', app)}
+                                                disabled={!!processing}
+                                                style={{ background: 'var(--secondary)', border: 'none', borderRadius: 4, padding: '4px 8px', color: 'white', fontSize: '0.65rem', cursor: 'pointer' }}
+                                              >
+                                                Hire
+                                              </button>
+                                            </div>
+                                          </div>
+                                        ))}
+                                        {applications.filter(a => a.account.job.toString() === pid).length === 0 && (
+                                          <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'center' }}>No applicants yet</p>
+                                        )}
+                                      </div>
+                                    </motion.div>
+                                  )}
+                                </div>
+                              )}
+                              {!isClient && !isFreelancer && status === 'open' && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                  {applyingFor === pid ? (
+                                    <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
+                                      <textarea
+                                        placeholder="Why are you a good fit? (Price, timeline, experience...)"
+                                        value={applyMessage}
+                                        onChange={(e) => setApplyMessage(e.target.value)}
+                                        style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 10, padding: 12, color: 'white', fontSize: '0.8rem', minHeight: 80, outline: 'none', marginBottom: 8 }}
+                                      />
+                                      <div style={{ display: 'flex', gap: 8 }}>
+                                        <button onClick={() => handleAction(job, 'apply', applyMessage)} disabled={!applyMessage || !!processing} className="btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
+                                          {isProc ? <RefreshCw size={14} className="spin" /> : 'Send Application'}
+                                        </button>
+                                        <button onClick={() => setApplyingFor(null)} className="btn-secondary" style={{ padding: '0 12px' }}>Cancel</button>
+                                      </div>
+                                    </motion.div>
+                                  ) : (
+                                    <button onClick={() => setApplyingFor(pid)} disabled={!!processing} className="btn-primary" style={{ justifyContent: 'center' }}>
+                                      Apply for Job
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                              {isFreelancer && status === 'inprogress' && (
+                                <button onClick={() => handleAction(job, 'submit')} disabled={!!processing} className="btn-primary" style={{ justifyContent: 'center', background: 'var(--secondary)' }}>
+                                  {isProc ? <RefreshCw size={14} className="spin" /> : 'Submit Work'}
+                                </button>
+                              )}
+                              {isClient && status === 'inreview' && (
+                                <button onClick={() => handleAction(job, 'approve')} disabled={!!processing} className="btn-primary" style={{ justifyContent: 'center', background: '#10b981' }}>
+                                  {isProc ? <RefreshCw size={14} className="spin" /> : 'Approve & Release Payment'}
+                                </button>
+                              )}
+                              {(isClient || isFreelancer) && (status === 'inprogress' || status === 'inreview') && (
+                                <button 
+                                  onClick={() => {
+                                    if(window.confirm('Are you sure? This will lock funds and alert the Arbiter.')) {
+                                      handleAction(job, 'dispute');
+                                    }
+                                  }} 
+                                  disabled={!!processing} 
+                                  className="btn-secondary" 
+                                  style={{ color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.2)', background: 'rgba(239, 68, 68, 0.05)', fontSize: '0.75rem', justifyContent: 'center' }}
+                                >
+                                  <Shield size={14} /> Raise Dispute
+                                </button>
+                              )}
+
+                              {/* Project Log / Evidence Timeline */}
+                              {(isClient || isFreelancer) && status !== 'open' && (
+                                <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                                  <p style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700, marginBottom: 8 }}>Project Timeline</p>
+
+                                  <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                                    <input
+                                      type="text"
+                                      placeholder="Post an update or link..."
+                                      value={updateMsg[pid] || ''}
+                                      onChange={(e) => setUpdateMsg({ ...updateMsg, [pid]: e.target.value })}
+                                      style={{ flex: 1, fontSize: '0.75rem', padding: '6px 10px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: 6, color: 'white' }}
+                                    />
+                                    <button
+                                      onClick={() => {
+                                        if (updateMsg[pid]) {
+                                          handleAction(job, 'post_update', updateMsg[pid]);
+                                          setUpdateMsg({ ...updateMsg, [pid]: '' });
+                                        }
+                                      }}
+                                      disabled={!!processing || !updateMsg[pid]}
+                                      className="btn-primary"
+                                      style={{ padding: '0 12px', height: 32, fontSize: '0.7rem' }}
+                                    >
+                                      Post
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {activeTab === 'arbitration' && status === 'disputed' && (
+                              <div style={{ marginTop: 16, background: 'rgba(239, 68, 68, 0.05)', padding: 16, borderRadius: 12, border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                                <p style={{ fontSize: '0.75rem', fontWeight: 800, color: '#f87171', marginBottom: 12, textTransform: 'uppercase' }}>Dispute Settlement</p>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                  <div>
+                                    <label className="label">Freelancer Award (Raw Tokens)</label>
+                                    <input
+                                      type="number"
+                                      placeholder="Amount to Freelancer"
+                                      value={disputeSplit[pid] || ''}
+                                      onChange={(e) => setDisputeSplit({ ...disputeSplit, [pid]: e.target.value })}
+                                    />
+                                  </div>
+                                  <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                                    Remaining {formatAmount(job.account.amount.sub(new anchor.BN(disputeSplit[pid] || 0)), job.account.decimals)} will return to Client.
+                                  </p>
+                                  <button
+                                    onClick={() => {
+                                      const fAward = Number(disputeSplit[pid]);
+                                      const cAward = Number(job.account.amount.toString()) - fAward;
+                                      handleAction(job, 'resolve_dispute', { freelancerAward: fAward, clientAward: cAward });
+                                    }}
+                                    disabled={!!processing || !disputeSplit[pid]}
+                                    className="btn-primary"
+                                    style={{ background: '#ef4444', color: 'white', justifyContent: 'center' }}
+                                  >
+                                    Settle Dispute
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            )}
+          </motion.div>
+        </div>
+        <footer style={{ textAlign: 'center', padding: '48px 0 0', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+          <p>© 2026 TrustLayer Gigs · Built on Solana</p>
+        </footer>
       </div>
-      <footer style={{ textAlign: 'center', padding: '48px 0 0', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-        <p>© 2026 TrustLayer Gigs · Built on Solana</p>
-      </footer>
-    </div>
+    </>
   );
 }
