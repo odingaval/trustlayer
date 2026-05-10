@@ -4,7 +4,7 @@ window.Buffer = (window as any).Buffer || Buffer;
 
 import { useWallet, useAnchorWallet, useConnection } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
-import { PublicKey, SystemProgram } from '@solana/web3.js';
+import { PublicKey, SystemProgram, ComputeBudgetProgram } from '@solana/web3.js';
 import * as anchor from '@coral-xyz/anchor';
 import {
   TOKEN_PROGRAM_ID,
@@ -220,6 +220,8 @@ export function FreelanceContent({ toast }: { toast: any }) {
 
       const totalAmount = new anchor.BN(Number(amount) * Math.pow(10, decimals));
 
+      const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 });
+
       await program.methods.initializeJob(
         jobId,
         totalAmount,
@@ -235,7 +237,9 @@ export function FreelanceContent({ toast }: { toast: any }) {
           clientTokenAccount: clientTA,
           job: jobPDA,
           vault: vaultPDA,
-        } as any).rpc();
+        } as any)
+        .preInstructions([computeBudgetIx])
+        .rpc();
 
       toast.show('Job created successfully!', 'success');
       setAmount(''); setMint(''); setTitle(''); setDescription(''); setMilestones([]);
