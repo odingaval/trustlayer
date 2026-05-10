@@ -220,7 +220,8 @@ export function FreelanceContent({ toast }: { toast: any }) {
 
       const totalAmount = new anchor.BN(Number(amount) * Math.pow(10, decimals));
 
-      const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 });
+      const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 });
+      const priorityFeeIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_000 });
 
       await program.methods.initializeJob(
         jobId,
@@ -238,7 +239,7 @@ export function FreelanceContent({ toast }: { toast: any }) {
           job: jobPDA,
           vault: vaultPDA,
         } as any)
-        .preInstructions([computeBudgetIx])
+        .preInstructions([computeBudgetIx, priorityFeeIx])
         .rpc();
 
       toast.show('Job created successfully!', 'success');

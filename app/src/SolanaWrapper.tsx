@@ -16,7 +16,7 @@ import { Loader2, AlertCircle } from 'lucide-react';
 const FreelanceContent = lazy(() => import('./FreelanceContent').then(m => ({ default: m.FreelanceContent })));
 
 export default function SolanaWrapper({ toast }: { toast: any }) {
-  // Use Devnet for testing as it's more reliable for handshake verification
+  // Program is deployed on Devnet
   const endpoint = useMemo(() => clusterApiUrl('devnet'), []);
   
   // Explicitly list adapters for better stability
