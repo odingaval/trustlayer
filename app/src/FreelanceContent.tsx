@@ -432,9 +432,11 @@ export function FreelanceContent({ toast }: { toast: any }) {
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 24px', paddingBottom: 60, position: 'relative' }}>
         <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '32px 0 56px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <div style={{ width: 44, height: 44, borderRadius: 14, background: 'linear-gradient(135deg, #7B3FE4, #10B981)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Briefcase size={22} color="white" />
-            </div>
+            <img
+              src="/logo.png"
+              alt="TrustLayer Logo"
+              style={{ width: 44, height: 44, borderRadius: 12, objectFit: 'cover' }}
+            />
             <div>
               <h1 style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1 }}>
                 Trust<span className="gradient-text">Layer</span> Gigs
