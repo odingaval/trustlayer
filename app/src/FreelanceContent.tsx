@@ -716,7 +716,6 @@ export function FreelanceContent({ toast }: { toast: any }) {
                       {(activeTab === 'client' ? myClientJobs : activeTab === 'freelancer' ? myFreelancerJobs : activeTab === 'arbitration' ? myArbiterJobs : openJobs).map(job => {
                         const isClient = job.account.client.toString() === publicKey?.toString();
                         const isFreelancer = job.account.freelancer.toString() === publicKey?.toString();
-                        const isArbiter = job.account.arbiter.toString() === publicKey?.toString();
                         const status = Object.keys(job.account.status)[0];
                         const pid = job.publicKey.toString();
                         const isProc = processing === pid;
