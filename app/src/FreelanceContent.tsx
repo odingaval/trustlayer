@@ -362,14 +362,8 @@ export function FreelanceContent({ toast }: { toast: any }) {
     setProcessing(id);
     try {
       const jobAccount = job.account;
-      const clientPK = jobAccount.client;
       const mintPK = jobAccount.mint;
-      const jobId = jobAccount.jobId;
-
-      const [jobPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('job_v3'), clientPK.toBuffer(), jobId.toArrayLike(Buffer, 'le', 8)],
-        program.programId
-      );
+      const jobPDA = job.publicKey;
       const [vaultPDA] = PublicKey.findProgramAddressSync(
         [Buffer.from('vault'), jobPDA.toBuffer()],
         program.programId
