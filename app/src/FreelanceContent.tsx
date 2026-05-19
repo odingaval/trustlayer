@@ -73,9 +73,7 @@ export function FreelanceContent({ toast }: { toast: any }) {
 
     setFetching(true);
     try {
-      const allJobs = await program.account.jobEscrow.all([
-        { dataSize: 663 }
-      ]);
+      const allJobs = await program.account.jobEscrow.all();
       setJobs(allJobs);
 
       const allApps = await program.account.jobApplication.all();
