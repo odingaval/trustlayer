@@ -66,15 +66,15 @@ export function FreelanceContent({ toast }: { toast: any }) {
 
   const [lastFetch, setLastFetch] = useState(0);
 
-  const fetchJobs = useCallback(async () => {
+  const fetchJobs = useCallback(async (force = false) => {
     if (!program || fetching) return;
     // Don't fetch more than once every 5 seconds unless forced
-    if (Date.now() - lastFetch < 5000) return;
+    if (!force && (Date.now() - lastFetch < 5000)) return;
 
     setFetching(true);
     try {
       const allJobs = await program.account.jobEscrow.all([
-        { dataSize: 1022 }
+        { dataSize: 663 }
       ]);
       setJobs(allJobs);
 
@@ -248,7 +248,7 @@ export function FreelanceContent({ toast }: { toast: any }) {
 
       toast.show('Job created successfully!', 'success');
       setAmount(''); setMint(''); setTitle(''); setDescription(''); setMilestones([]);
-      fetchJobs();
+      fetchJobs(true);
       fetchBalance();
     } catch (err: any) {
       console.error("Action failed:", err);
@@ -405,7 +405,7 @@ export function FreelanceContent({ toast }: { toast: any }) {
         toast.show('Job cancelled & refunded!', 'success');
       }
 
-      fetchJobs();
+      fetchJobs(true);
     } catch (err: any) {
       toast.show(action + ' failed: ' + (err?.message || err), 'error');
     } finally { setProcessing(null); }
