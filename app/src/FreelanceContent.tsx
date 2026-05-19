@@ -214,6 +214,10 @@ export function FreelanceContent({ toast }: { toast: any }) {
       const mintInfo = await connection.getParsedAccountInfo(mintPK);
       const decimals = (mintInfo.value?.data as any)?.parsed?.info?.decimals || 0;
 
+      // Truncate strings to prevent Solana's strict 1232-byte transaction size limit from being exceeded
+      const safeTitle = title.substring(0, 50).trim();
+      const safeDescription = description.substring(0, 300).trim();
+
       const milestoneAmounts = milestones.length > 0
         ? milestones.map(m => new anchor.BN(Number(m.amount) * Math.pow(10, decimals)))
         : [];
@@ -227,8 +231,8 @@ export function FreelanceContent({ toast }: { toast: any }) {
         jobId,
         totalAmount,
         arbiterPK,
-        title,
-        description,
+        safeTitle,
+        safeDescription,
         milestoneAmounts,
         decimals
       )
