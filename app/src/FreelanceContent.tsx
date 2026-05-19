@@ -73,11 +73,48 @@ export function FreelanceContent({ toast }: { toast: any }) {
 
     setFetching(true);
     try {
-      const allJobs = await program.account.jobEscrow.all();
-      setJobs(allJobs);
+      // Fetch all raw program accounts for JobEscrow
+      const coder = program.coder.accounts;
+      const rawJobs = await connection.getProgramAccounts(program.programId, {
+        filters: [
+          coder.memcmp("jobEscrow")
+        ]
+      });
 
-      const allApps = await program.account.jobApplication.all();
-      setApplications(allApps);
+      const parsedJobs: any[] = [];
+      for (const raw of rawJobs) {
+        try {
+          const decoded = coder.decode("JobEscrow", raw.account.data);
+          parsedJobs.push({
+            publicKey: raw.pubkey,
+            account: decoded
+          });
+        } catch (e) {
+          console.warn("Skipping outdated JobEscrow account structure:", raw.pubkey.toString());
+        }
+      }
+      setJobs(parsedJobs);
+
+      // Fetch all raw program accounts for JobApplication
+      const rawApps = await connection.getProgramAccounts(program.programId, {
+        filters: [
+          coder.memcmp("jobApplication")
+        ]
+      });
+
+      const parsedApps: any[] = [];
+      for (const raw of rawApps) {
+        try {
+          const decoded = coder.decode("JobApplication", raw.account.data);
+          parsedApps.push({
+            publicKey: raw.pubkey,
+            account: decoded
+          });
+        } catch (e) {
+          console.warn("Skipping outdated JobApplication account structure:", raw.pubkey.toString());
+        }
+      }
+      setApplications(parsedApps);
 
       setLastFetch(Date.now());
     } catch (err: any) {
