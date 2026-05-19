@@ -481,7 +481,12 @@ export function FreelanceContent({ toast }: { toast: any }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginRight: 16, borderRight: '1px solid var(--border)', paddingRight: 16 }}>
                 <div style={{ textAlign: 'right' }}>
                   <p style={{ fontSize: '0.85rem', fontWeight: 700, color: 'white' }}>{userProfile.username}</p>
-                  <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{userProfile.jobsCompleted} Jobs · {userProfile.totalEarned.toString()} Earned</p>
+                  <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                    {viewMode === 'hire' 
+                      ? `Client · ${myClientJobs.length} Gigs Posted` 
+                      : `Freelancer · ${userProfile.jobsCompleted} Completed · ${userProfile.totalEarned.toString()} Earned`
+                    }
+                  </p>
                 </div>
                 <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', fontWeight: 800 }}>
                   {userProfile.username[0].toUpperCase()}
