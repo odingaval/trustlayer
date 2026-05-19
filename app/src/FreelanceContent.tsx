@@ -421,8 +421,10 @@ export function FreelanceContent({ toast }: { toast: any }) {
       } else if (action === 'post_update') {
         const updateText = arg as string;
         const timestamp = Math.floor(Date.now() / 1000);
+        const timestampArr = new Uint8Array(8);
+        new DataView(timestampArr.buffer).setUint32(0, timestamp, true);
         const [logPDA] = PublicKey.findProgramAddressSync(
-          [Buffer.from('log'), jobPDA.toBuffer(), publicKey.toBuffer(), new anchor.BN(timestamp).toArrayLike(Buffer, 'le', 8)],
+          [Buffer.from('log'), jobPDA.toBuffer(), publicKey.toBuffer(), timestampArr],
           program.programId
         );
         await program.methods.postProjectUpdate(updateText, new anchor.BN(timestamp))
