@@ -493,7 +493,7 @@ export function FreelanceContent({ toast }: { toast: any }) {
             )}
 
             {program && (
-              <button onClick={fetchJobs} disabled={fetching} className="btn-ghost" title="Refresh jobs" style={{ padding: '8px 10px' }}>
+              <button onClick={() => fetchJobs(true)} disabled={fetching} className="btn-ghost" title="Refresh jobs" style={{ padding: '8px 10px' }}>
                 <RefreshCw size={15} className={fetching ? 'spin' : ''} />
               </button>
             )}
