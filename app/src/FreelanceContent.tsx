@@ -77,7 +77,7 @@ export function FreelanceContent({ toast }: { toast: any }) {
       const coder = program.coder.accounts;
       const rawJobs = await connection.getProgramAccounts(program.programId, {
         filters: [
-          coder.memcmp("jobEscrow")
+          { memcmp: coder.memcmp("JobEscrow") }
         ]
       });
 
@@ -98,7 +98,7 @@ export function FreelanceContent({ toast }: { toast: any }) {
       // Fetch all raw program accounts for JobApplication
       const rawApps = await connection.getProgramAccounts(program.programId, {
         filters: [
-          coder.memcmp("jobApplication")
+          { memcmp: coder.memcmp("JobApplication") }
         ]
       });
 
