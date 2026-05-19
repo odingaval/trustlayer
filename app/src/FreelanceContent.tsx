@@ -47,6 +47,10 @@ export function FreelanceContent({ toast }: { toast: any }) {
   const [updateMsg, setUpdateMsg] = useState<{ [key: string]: string }>({});
   const [disputeSplit, setDisputeSplit] = useState<{ [key: string]: string }>({});
   const [userProfile, setUserProfile] = useState<any>(null);
+  const [profileOverride, setProfileOverride] = useState<{ username: string; bio: string } | null>(null);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [editUsername, setEditUsername] = useState('');
+  const [editBio, setEditBio] = useState('');
   const [isProfileLoading, setIsProfileLoading] = useState(true);
   const [setupUsername, setSetupUsername] = useState('');
   const [setupBio, setSetupBio] = useState('');
@@ -139,6 +143,14 @@ export function FreelanceContent({ toast }: { toast: any }) {
   const fetchProfile = useCallback(async () => {
     if (!program || !publicKey) return;
     try {
+      // Check local override first
+      const stored = localStorage.getItem(`profile_override_${publicKey.toString()}`);
+      if (stored) {
+        setProfileOverride(JSON.parse(stored));
+      } else {
+        setProfileOverride(null);
+      }
+
       const [profilePDA] = PublicKey.findProgramAddressSync(
         [Buffer.from('user_profile'), publicKey.toBuffer()],
         program.programId
@@ -153,6 +165,30 @@ export function FreelanceContent({ toast }: { toast: any }) {
     }
   }, [program, publicKey]);
 
+  const activeProfile = useMemo(() => {
+    if (profileOverride) {
+      return {
+        username: profileOverride.username,
+        bio: profileOverride.bio,
+        jobsCompleted: userProfile?.jobsCompleted || 0,
+        totalEarned: userProfile?.totalEarned || new anchor.BN(0)
+      };
+    }
+    return userProfile;
+  }, [profileOverride, userProfile]);
+
+  const handleSaveProfile = async (username: string, bio: string) => {
+    if (!publicKey) return;
+    try {
+      localStorage.setItem(`profile_override_${publicKey.toString()}`, JSON.stringify({ username, bio }));
+      setProfileOverride({ username, bio });
+      toast.show('Profile updated successfully!', 'success');
+      setIsEditingProfile(false);
+    } catch (err: any) {
+      toast.show('Failed to save profile: ' + err.message, 'error');
+    }
+  };
+
   useEffect(() => {
     if (program && publicKey) {
       fetchJobs();
@@ -162,6 +198,7 @@ export function FreelanceContent({ toast }: { toast: any }) {
       setJobs([]);
       setTokenBalance(null);
       setUserProfile(null);
+      setProfileOverride(null);
     }
   }, [publicKey, program, fetchProfile]); // Auto-refresh everything when wallet changes
 
@@ -512,20 +549,101 @@ export function FreelanceContent({ toast }: { toast: any }) {
               </button>
             </div>
 
-            {program && userProfile && (
+            {program && activeProfile && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginRight: 16, borderRight: '1px solid var(--border)', paddingRight: 16 }}>
-                <div style={{ textAlign: 'right' }}>
-                  <p style={{ fontSize: '0.85rem', fontWeight: 700, color: 'white' }}>{userProfile.username}</p>
-                  <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                    {viewMode === 'hire' 
-                      ? `Client · ${myClientJobs.length} Gigs Posted` 
-                      : `Freelancer · ${userProfile.jobsCompleted} Completed · ${userProfile.totalEarned.toString()} Earned`
-                    }
-                  </p>
-                </div>
-                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', fontWeight: 800 }}>
-                  {userProfile.username[0].toUpperCase()}
-                </div>
+                {isEditingProfile ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="text"
+                      value={editUsername}
+                      onChange={(e) => setEditUsername(e.target.value)}
+                      placeholder="Username"
+                      style={{
+                        background: 'rgba(0,0,0,0.4)',
+                        border: '1px solid var(--secondary)',
+                        borderRadius: 4,
+                        padding: '4px 8px',
+                        fontSize: '0.8rem',
+                        color: 'white',
+                        width: 120,
+                        height: 28,
+                      }}
+                    />
+                    <button
+                      onClick={() => handleSaveProfile(editUsername, editBio)}
+                      className="btn-primary"
+                      style={{
+                        padding: 0,
+                        width: 28,
+                        height: 28,
+                        background: 'var(--solana-green)',
+                        borderRadius: 4,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minWidth: 28
+                      }}
+                    >
+                      <Check size={14} />
+                    </button>
+                    <button
+                      onClick={() => setIsEditingProfile(false)}
+                      className="btn-ghost"
+                      style={{
+                        padding: 0,
+                        width: 28,
+                        height: 28,
+                        background: 'rgba(255,255,255,0.05)',
+                        borderRadius: 4,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minWidth: 28
+                      }}
+                    >
+                      <span style={{ fontSize: '0.8rem', fontWeight: 800 }}>×</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+                        <p style={{ fontSize: '0.85rem', fontWeight: 700, color: 'white' }}>{activeProfile.username}</p>
+                        <button
+                          onClick={() => {
+                            setEditUsername(activeProfile.username);
+                            setEditBio(activeProfile.bio || '');
+                            setIsEditingProfile(true);
+                          }}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            padding: 0,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            opacity: 0.5,
+                            color: 'white',
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+                          onMouseLeave={(e) => e.currentTarget.style.opacity = '0.5'}
+                          title="Edit Profile Name"
+                        >
+                          <Wand2 size={12} />
+                        </button>
+                      </div>
+                      <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                        {viewMode === 'hire' 
+                          ? `Client · ${myClientJobs.length} Gigs Posted` 
+                          : `Freelancer · ${activeProfile.jobsCompleted} Completed · ${activeProfile.totalEarned.toString()} Earned`
+                        }
+                      </p>
+                    </div>
+                    <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', fontWeight: 800 }}>
+                      {activeProfile.username[0].toUpperCase()}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
