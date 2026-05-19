@@ -77,14 +77,14 @@ export function FreelanceContent({ toast }: { toast: any }) {
       const coder = program.coder.accounts;
       const rawJobs = await connection.getProgramAccounts(program.programId, {
         filters: [
-          { memcmp: coder.memcmp("JobEscrow") }
+          { memcmp: coder.memcmp("jobEscrow") }
         ]
       });
 
       const parsedJobs: any[] = [];
       for (const raw of rawJobs) {
         try {
-          const decoded = coder.decode("JobEscrow", raw.account.data);
+          const decoded = coder.decode("jobEscrow", raw.account.data);
           parsedJobs.push({
             publicKey: raw.pubkey,
             account: decoded
@@ -98,14 +98,14 @@ export function FreelanceContent({ toast }: { toast: any }) {
       // Fetch all raw program accounts for JobApplication
       const rawApps = await connection.getProgramAccounts(program.programId, {
         filters: [
-          { memcmp: coder.memcmp("JobApplication") }
+          { memcmp: coder.memcmp("jobApplication") }
         ]
       });
 
       const parsedApps: any[] = [];
       for (const raw of rawApps) {
         try {
-          const decoded = coder.decode("JobApplication", raw.account.data);
+          const decoded = coder.decode("jobApplication", raw.account.data);
           parsedApps.push({
             publicKey: raw.pubkey,
             account: decoded
