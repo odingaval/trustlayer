@@ -369,6 +369,10 @@ export function FreelanceContent({ toast }: { toast: any }) {
         program.programId
       );
 
+      // Define compute budget and priority fees globally to speed up all actions on Devnet
+      const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 });
+      const priorityFeeIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000 });
+
       if (action === 'apply') {
         const message = arg as string;
         if (!message) return;
@@ -383,7 +387,9 @@ export function FreelanceContent({ toast }: { toast: any }) {
             freelancer: publicKey,
             job: job.publicKey,
             application: appPDA,
-          } as any).rpc();
+          } as any)
+          .preInstructions([computeBudgetIx, priorityFeeIx])
+          .rpc();
         toast.show('Application sent!', 'success');
         setApplyingFor(null);
         setApplyMessage('');
@@ -394,14 +400,18 @@ export function FreelanceContent({ toast }: { toast: any }) {
             client: publicKey,
             job: job.publicKey,
             application: app.publicKey,
-          } as any).rpc();
+          } as any)
+          .preInstructions([computeBudgetIx, priorityFeeIx])
+          .rpc();
         toast.show('Freelancer hired!', 'success');
         setViewingAppsFor(null);
       } else if (action === 'submit') {
         const link = prompt("Please provide a link to your work (e.g. GitHub, Google Drive):");
         if (!link) { setProcessing(null); return; }
         await program.methods.submitWork(link)
-          .accounts({ freelancer: publicKey, job: jobPDA } as any).rpc();
+          .accounts({ freelancer: publicKey, job: jobPDA } as any)
+          .preInstructions([computeBudgetIx, priorityFeeIx])
+          .rpc();
         toast.show('Work submitted for review!', 'success');
       } else if (action === 'release_milestone') {
         const milestoneIdx = arg as number;
@@ -416,7 +426,9 @@ export function FreelanceContent({ toast }: { toast: any }) {
             client: publicKey, freelancer: freelancerPK, job: jobPDA,
             mint: mintPK, freelancerTokenAccount: freelancerTA, vault: vaultPDA,
             freelancerProfile: freelancerProfilePDA
-          } as any).rpc();
+          } as any)
+          .preInstructions([computeBudgetIx, priorityFeeIx])
+          .rpc();
         toast.show('Milestone payment released!', 'success');
       } else if (action === 'post_update') {
         const updateText = arg as string;
@@ -431,7 +443,9 @@ export function FreelanceContent({ toast }: { toast: any }) {
           .accounts({
             author: publicKey, job: jobPDA, log: logPDA,
             systemProgram: SystemProgram.programId
-          } as any).rpc();
+          } as any)
+          .preInstructions([computeBudgetIx, priorityFeeIx])
+          .rpc();
         toast.show('Update posted to chain!', 'success');
       } else if (action === 'approve') {
         const freelancerPK = jobAccount.freelancer;
@@ -445,10 +459,15 @@ export function FreelanceContent({ toast }: { toast: any }) {
             client: publicKey, freelancer: freelancerPK, job: jobPDA,
             mint: mintPK, freelancerTokenAccount: freelancerTA, vault: vaultPDA,
             freelancerProfile: freelancerProfilePDA
-          } as any).rpc();
+          } as any)
+          .preInstructions([computeBudgetIx, priorityFeeIx])
+          .rpc();
         toast.show('Payment released and reputation updated!', 'success');
       } else if (action === 'dispute') {
-        await program.methods.dispute().accounts({ user: publicKey, job: jobPDA }).rpc();
+        await program.methods.dispute()
+          .accounts({ user: publicKey, job: jobPDA })
+          .preInstructions([computeBudgetIx, priorityFeeIx])
+          .rpc();
         toast.show('Dispute initiated. Funds locked for Arbiter review.', 'info');
       } else if (action === 'resolve_dispute') {
         const { freelancerAward, clientAward } = arg as { freelancerAward: number, clientAward: number };
@@ -464,12 +483,16 @@ export function FreelanceContent({ toast }: { toast: any }) {
             job: jobPDA, mint: mintPK, freelancerTokenAccount: freelancerTA,
             clientTokenAccount: clientTA, vault: vaultPDA, freelancerProfile: freelancerProfilePDA,
             tokenProgram: TOKEN_PROGRAM_ID
-          } as any).rpc();
+          } as any)
+          .preInstructions([computeBudgetIx, priorityFeeIx])
+          .rpc();
         toast.show('Dispute settled and funds distributed!', 'success');
       } else if (action === 'cancel') {
         const clientTA = getAssociatedTokenAddressSync(mintPK, publicKey);
         await program.methods.cancelJob()
-          .accounts({ client: publicKey, job: jobPDA, mint: mintPK, clientTokenAccount: clientTA, vault: vaultPDA } as any).rpc();
+          .accounts({ client: publicKey, job: jobPDA, mint: mintPK, clientTokenAccount: clientTA, vault: vaultPDA } as any)
+          .preInstructions([computeBudgetIx, priorityFeeIx])
+          .rpc();
         toast.show('Job cancelled & refunded!', 'success');
       }
 
@@ -1034,17 +1057,17 @@ export function FreelanceContent({ toast }: { toast: any }) {
                                   )}
                                 </div>
                               )}
-                              {isFreelancer && status === 'inprogress' && (
+                              {isFreelancer && status === 'inProgress' && (
                                 <button onClick={() => handleAction(job, 'submit')} disabled={!!processing} className="btn-primary" style={{ justifyContent: 'center', background: 'var(--secondary)' }}>
                                   {isProc ? <RefreshCw size={14} className="spin" /> : 'Submit Work'}
                                 </button>
                               )}
-                              {isClient && status === 'inreview' && (
+                              {isClient && status === 'inReview' && (
                                 <button onClick={() => handleAction(job, 'approve')} disabled={!!processing} className="btn-primary" style={{ justifyContent: 'center', background: '#10b981' }}>
                                   {isProc ? <RefreshCw size={14} className="spin" /> : 'Approve & Release Payment'}
                                 </button>
                               )}
-                              {(isClient || isFreelancer) && (status === 'inprogress' || status === 'inreview') && (
+                              {(isClient || isFreelancer) && (status === 'inProgress' || status === 'inReview') && (
                                 <button 
                                   onClick={() => {
                                     if(window.confirm('Are you sure? This will lock funds and alert the Arbiter.')) {
