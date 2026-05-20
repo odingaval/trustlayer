@@ -44,6 +44,8 @@ export function FreelanceContent({ toast }: { toast: any }) {
   const [viewingAppsFor, setViewingAppsFor] = useState<string | null>(null);
   const [applyingFor, setApplyingFor] = useState<string | null>(null);
   const [applyMessage, setApplyMessage] = useState('');
+  const [submittingWorkFor, setSubmittingWorkFor] = useState<string | null>(null);
+  const [submitLink, setSubmitLink] = useState('');
   const [updateMsg, setUpdateMsg] = useState<{ [key: string]: string }>({});
   const [disputeSplit, setDisputeSplit] = useState<{ [key: string]: string }>({});
   const [userProfile, setUserProfile] = useState<any>(null);
@@ -406,13 +408,15 @@ export function FreelanceContent({ toast }: { toast: any }) {
         toast.show('Freelancer hired!', 'success');
         setViewingAppsFor(null);
       } else if (action === 'submit') {
-        const link = prompt("Please provide a link to your work (e.g. GitHub, Google Drive):");
+        const link = arg as string;
         if (!link) { setProcessing(null); return; }
         await program.methods.submitWork(link)
           .accounts({ freelancer: publicKey, job: jobPDA } as any)
           .preInstructions([computeBudgetIx, priorityFeeIx])
           .rpc();
         toast.show('Work submitted for review!', 'success');
+        setSubmittingWorkFor(null);
+        setSubmitLink('');
       } else if (action === 'release_milestone') {
         const milestoneIdx = arg as number;
         const freelancerPK = jobAccount.freelancer;
@@ -1058,9 +1062,34 @@ export function FreelanceContent({ toast }: { toast: any }) {
                                 </div>
                               )}
                               {isFreelancer && status === 'inProgress' && (
-                                <button onClick={() => handleAction(job, 'submit')} disabled={!!processing} className="btn-primary" style={{ justifyContent: 'center', background: 'var(--secondary)' }}>
-                                  {isProc ? <RefreshCw size={14} className="spin" /> : 'Submit Work'}
-                                </button>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                  {submittingWorkFor === pid ? (
+                                    <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                      <input
+                                        type="text"
+                                        placeholder="Enter link to your completed work (e.g. GitHub, Drive)..."
+                                        value={submitLink}
+                                        onChange={(e) => setSubmitLink(e.target.value)}
+                                        style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', color: 'white', fontSize: '0.8rem', outline: 'none' }}
+                                      />
+                                      <div style={{ display: 'flex', gap: 8 }}>
+                                        <button 
+                                          onClick={() => handleAction(job, 'submit', submitLink)} 
+                                          disabled={!submitLink || !!processing} 
+                                          className="btn-primary" 
+                                          style={{ flex: 1, justifyContent: 'center', background: 'var(--secondary)' }}
+                                        >
+                                          {isProc ? <RefreshCw size={14} className="spin" /> : 'Confirm Submission'}
+                                        </button>
+                                        <button onClick={() => setSubmittingWorkFor(null)} className="btn-secondary" style={{ padding: '0 12px' }}>Cancel</button>
+                                      </div>
+                                    </motion.div>
+                                  ) : (
+                                    <button onClick={() => { setSubmittingWorkFor(pid); setSubmitLink(''); }} disabled={!!processing} className="btn-primary" style={{ justifyContent: 'center', background: 'var(--secondary)' }}>
+                                      Submit Work
+                                    </button>
+                                  )}
+                                </div>
                               )}
                               {isClient && status === 'inReview' && (
                                 <button onClick={() => handleAction(job, 'approve')} disabled={!!processing} className="btn-primary" style={{ justifyContent: 'center', background: '#10b981' }}>
