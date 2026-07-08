@@ -15,7 +15,7 @@ import { Loader2, AlertCircle } from 'lucide-react';
 // Even lazier load for the actual dashboard content
 const FreelanceContent = lazy(() => import('./FreelanceContent').then(m => ({ default: m.FreelanceContent })));
 
-export default function SolanaWrapper({ toast }: { toast: any }) {
+export default function SolanaWrapper({ toast, onBack }: { toast: any; onBack: () => void }) {
   // Program is deployed on Devnet
   const endpoint = useMemo(() => clusterApiUrl('devnet'), []);
   
@@ -36,7 +36,7 @@ export default function SolanaWrapper({ toast }: { toast: any }) {
             </div>
           }>
             <ErrorBoundary>
-              <FreelanceContent toast={toast} />
+              <FreelanceContent toast={toast} onBack={onBack} />
             </ErrorBoundary>
           </Suspense>
         </WalletModalProvider>

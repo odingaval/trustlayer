@@ -16,13 +16,14 @@ import {
 } from '@solana/spl-token';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Lock, RefreshCw, Layers, Briefcase, PlusCircle, Check, Coins, Wand2, Shield, User
+  Lock, RefreshCw, Layers, Briefcase, PlusCircle, Check, Coins, Wand2, Shield, User, ArrowLeft
 } from 'lucide-react';
 
+import { RoleSelector } from './RoleSelector';
 import idl from './trustlayer.json';
 import type { Trustlayer } from './trustlayer';
 
-export function FreelanceContent({ toast }: { toast: any }) {
+export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => void }) {
   const { connection } = useConnection();
   const { publicKey, signTransaction, signAllTransactions, sendTransaction } = useWallet();
   const anchorWallet = useAnchorWallet();
@@ -525,50 +526,66 @@ export function FreelanceContent({ toast }: { toast: any }) {
     return <span style={{ color: mapped.color, fontWeight: 700, fontSize: '0.8rem', background: 'rgba(255,255,255,0.05)', padding: '4px 8px', borderRadius: 6 }}>{mapped.label}</span>;
   };
 
+  const isClient = viewMode === 'hire';
+  const accent = isClient ? '#7B3FE4' : '#10B981';
+  const accentLight = isClient ? '#A78BFA' : '#6EE7B7';
+  const accentBg = isClient ? 'rgba(123, 63, 228, 0.08)' : 'rgba(16, 185, 129, 0.08)';
+  const accentBorder = isClient ? 'rgba(123, 63, 228, 0.2)' : 'rgba(16, 185, 129, 0.2)';
+
+  // Show role selector if user has connected but not picked a role yet
+  const [roleChosen, setRoleChosen] = useState(false);
+
+  if (!roleChosen) {
+    return <RoleSelector onSelect={(role) => { setViewMode(role); setActiveTab(role === 'hire' ? 'client' : 'market'); setRoleChosen(true); }} />;
+  }
+
   return (
     <>
       <div className="mesh-bg" />
+      <div className="grid-overlay" />
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 24px', paddingBottom: 60, position: 'relative' }}>
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '32px 0 56px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '28px 0 48px', borderBottom: `1px solid ${accentBorder}`, marginBottom: 40 }}>
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer' }}
+            onClick={onBack}
+            title="Back to Home"
+            onMouseEnter={e => (e.currentTarget.style.opacity = '0.75')}
+            onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+          >
             <img
               src="/logo.png"
               alt="TrustLayer Logo"
               style={{ width: 44, height: 44, borderRadius: 12, objectFit: 'cover' }}
             />
             <div>
-              <h1 style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1 }}>
-                Trust<span className="gradient-text">Layer</span> Gigs
-              </h1>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <h1 style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1 }}>
+                  Trust<span className="gradient-text">Layer</span> Gigs
+                </h1>
+                <span style={{ fontSize: '0.6rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', padding: '3px 8px', borderRadius: 6, background: 'rgba(251, 191, 36, 0.1)', color: '#fbbf24', border: '1px solid rgba(251, 191, 36, 0.25)' }}>
+                  Devnet · Test Only
+                </span>
+              </div>
               <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 2 }}>
                 Freelance Escrow Dashboard
               </p>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {/* Role Toggle Switch */}
-            <div style={{ display: 'flex', background: 'rgba(255,255,255,0.03)', padding: 4, borderRadius: 12, border: '1px solid var(--border)', marginRight: 10 }}>
+            {/* Role Badge */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px', borderRadius: 10, background: accentBg, border: `1px solid ${accentBorder}`, marginRight: 8 }}>
+              {isClient ? <PlusCircle size={14} color={accentLight} /> : <Briefcase size={14} color={accentLight} />}
+              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: accentLight }}>
+                {isClient ? 'Client Mode' : 'Freelancer Mode'}
+              </span>
               <button
-                onClick={() => { setViewMode('hire'); setActiveTab('client'); }}
-                style={{
-                  padding: '6px 16px', borderRadius: 8, border: 'none', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer',
-                  background: viewMode === 'hire' ? 'var(--solana-purple)' : 'transparent',
-                  color: 'white',
-                  transition: 'all 0.2s'
-                }}
+                onClick={() => setRoleChosen(false)}
+                style={{ marginLeft: 4, background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.7rem', padding: 0, display: 'flex', alignItems: 'center', gap: 3 }}
+                title="Switch role"
+                onMouseEnter={e => e.currentTarget.style.color = 'white'}
+                onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
               >
-                I want to Hire
-              </button>
-              <button
-                onClick={() => { setViewMode('work'); setActiveTab('market'); }}
-                style={{
-                  padding: '6px 16px', borderRadius: 8, border: 'none', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer',
-                  background: viewMode === 'work' ? 'var(--solana-green)' : 'transparent',
-                  color: 'white',
-                  transition: 'all 0.2s'
-                }}
-              >
-                I want to Work
+                <ArrowLeft size={11} /> Switch
               </button>
             </div>
 
@@ -758,13 +775,20 @@ export function FreelanceContent({ toast }: { toast: any }) {
               </div>
               <div style={{ height: 1, background: 'var(--border)', margin: '18px 0' }} />
 
-              {!publicKey ? (
-                <div style={{ padding: '32px 16px', textAlign: 'center' }}>
-                  <Lock size={32} color="var(--text-muted)" style={{ margin: '0 auto 12px', opacity: 0.3, display: 'block' }} />
-                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Connect your wallet to post a gig.</p>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              <div style={{ position: 'relative' }}>
+                {!publicKey && (
+                  <div style={{ position: 'absolute', inset: -8, backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', background: 'rgba(18,18,20,0.75)', zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', borderRadius: 16, border: '1px solid rgba(255,255,255,0.05)', padding: 24 }}>
+                    <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(123, 63, 228, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16, border: '1px solid rgba(123, 63, 228, 0.25)', boxShadow: '0 0 24px rgba(123, 63, 228, 0.2)' }}>
+                      <Lock size={24} color="#A78BFA" />
+                    </div>
+                    <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 6, color: 'white', textAlign: 'center' }}>Connect Your Wallet</h3>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', textAlign: 'center', maxWidth: 230, lineHeight: 1.5, marginBottom: 20 }}>You'll need a Solana wallet like <strong style={{ color: 'white' }}>Phantom</strong> or <strong style={{ color: 'white' }}>Solflare</strong>. It's free and takes 2 minutes to set up.</p>
+                    <WalletMultiButton />
+                    <a href="https://phantom.app" target="_blank" rel="noopener noreferrer" style={{ marginTop: 12, color: 'var(--text-muted)', fontSize: '0.75rem', textDecoration: 'underline', cursor: 'pointer' }}>Don't have a wallet? Get Phantom →</a>
+                  </div>
+                )}
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 18, filter: !publicKey ? 'grayscale(0.8) opacity(0.5)' : 'none', pointerEvents: !publicKey ? 'none' : 'auto', transition: 'all 0.4s ease' }}>
                   <div>
                     <label className="label">Job Title</label>
                     <input type="text" placeholder="e.g. Design a Logo" value={title} onChange={e => setTitle(e.target.value)} />
@@ -775,25 +799,33 @@ export function FreelanceContent({ toast }: { toast: any }) {
                       placeholder="Describe what needs to be done..."
                       value={description}
                       onChange={e => setDescription(e.target.value)}
-                      style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 10, padding: 12, color: 'white', fontSize: '0.85rem', minHeight: 80, outline: 'none' }}
+                      style={{ width: '100%', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: 10, padding: 12, color: 'white', fontSize: '0.85rem', minHeight: 80, outline: 'none' }}
                     />
                   </div>
                   <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <label className="label" style={{ marginBottom: 0 }}>Payment Token Mint</label>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        {tokenBalance !== null && (
-                          <div style={{ fontSize: '0.65rem', color: 'var(--secondary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <Coins size={10} /> Bal: {tokenBalance}
-                          </div>
-                        )}
-                        <button onClick={handleCreateTestMint} disabled={minting} className="btn-ghost" style={{ fontSize: '0.65rem', padding: '2px 8px', height: 'auto', gap: 4 }}>
-                          {minting ? <RefreshCw size={10} className="spin" /> : <Wand2 size={10} />}
-                          Auto-Setup
-                        </button>
-                      </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <label className="label" style={{ marginBottom: 0 }}>Payment Token</label>
+                      {tokenBalance !== null && (
+                        <div style={{ fontSize: '0.65rem', color: 'var(--secondary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <Coins size={10} /> Balance: {tokenBalance}
+                        </div>
+                      )}
                     </div>
-                    <input type="text" placeholder="USDC Mint Address..." value={mint} onChange={e => setMint(e.target.value)} className="mono" />
+                    {/* Auto-Setup prominent CTA */}
+                    {!mint && (
+                      <button
+                        onClick={handleCreateTestMint}
+                        disabled={minting}
+                        style={{ width: '100%', marginBottom: 10, padding: '12px', borderRadius: 10, border: '1px dashed rgba(167, 139, 250, 0.4)', background: 'rgba(123, 63, 228, 0.06)', color: '#A78BFA', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, transition: 'all 0.2s' }}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(123,63,228,0.12)'; e.currentTarget.style.borderColor = 'rgba(167,139,250,0.6)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(123,63,228,0.06)'; e.currentTarget.style.borderColor = 'rgba(167,139,250,0.4)'; }}
+                      >
+                        {minting ? <RefreshCw size={14} className="spin" /> : <Wand2 size={14} />}
+                        {minting ? 'Creating test tokens...' : 'Auto-create test tokens (recommended)'}
+                      </button>
+                    )}
+                    <input type="text" placeholder={mint ? mint : 'Or paste a token mint address...'} value={mint} onChange={e => setMint(e.target.value)} style={{ fontFamily: mint ? 'monospace' : 'inherit', fontSize: mint ? '0.75rem' : '0.88rem' }} />
+                    {!mint && <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 6 }}>On testnet — no real money involved. Auto-create creates free test tokens instantly.</p>}
                   </div>
                   <div>
                     <label className="label">Budget Amount</label>
@@ -852,7 +884,7 @@ export function FreelanceContent({ toast }: { toast: any }) {
                     {loading ? 'Funding Escrow…' : !program ? 'Awaiting wallet…' : 'Fund Job'}
                   </button>
                 </div>
-              )}
+              </div>
             </motion.div>
           )}
 
