@@ -50,6 +50,7 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
   const [updateMsg, setUpdateMsg] = useState<{ [key: string]: string }>({});
   const [disputeSplit, setDisputeSplit] = useState<{ [key: string]: string }>({});
   const [userProfile, setUserProfile] = useState<any>(null);
+  const [mintDecimals, setMintDecimals] = useState<Record<string, number>>({});
   const [profileOverride, setProfileOverride] = useState<{ username: string; bio: string } | null>(null);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [editUsername, setEditUsername] = useState('');
@@ -102,26 +103,16 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
       }
       setJobs(parsedJobs);
 
-      // Fetch all raw program accounts for JobApplication
-      const rawApps = await connection.getProgramAccounts(program.programId, {
-        filters: [
-          { memcmp: coder.memcmp("jobApplication") }
-        ]
-      });
-
-      const parsedApps: any[] = [];
-      for (const raw of rawApps) {
+      // Fetch decimals for all unique mints to avoid trusting stored job.decimals
+      const uniqueMints = [...new Set(parsedJobs.map(j => j.account.mint.toString()))] as string[];
+      const mintDecMap: Record<string, number> = {};
+      for (const mint of uniqueMints) {
         try {
-          const decoded = coder.decode("jobApplication", raw.account.data);
-          parsedApps.push({
-            publicKey: raw.pubkey,
-            account: decoded
-          });
-        } catch (e) {
-          console.warn("Skipping outdated JobApplication account structure:", raw.pubkey.toString());
-        }
+          const info = await connection.getParsedAccountInfo(new PublicKey(mint));
+          mintDecMap[mint] = (info.value?.data as any)?.parsed?.info?.decimals ?? 0;
+        } catch { mintDecMap[mint] = 0; }
       }
-      setApplications(parsedApps);
+      setMintDecimals(prev => ({ ...prev, ...mintDecMap }));
 
       setLastFetch(Date.now());
     } catch (err: any) {
@@ -212,6 +203,10 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
     const num = Number(val) / Math.pow(10, decs);
     return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
   };
+
+  const getMintDecimals = useCallback((mint: string) => {
+    return mintDecimals[mint] ?? 0;
+  }, [mintDecimals]);
 
   const fetchBalance = useCallback(async () => {
     if (!connection || !publicKey || !mint) {
@@ -305,7 +300,6 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
       await program.methods.initializeJob(
         jobId,
         totalAmount,
-        arbiterPK,
         safeTitle,
         safeDescription,
         milestoneAmounts,
@@ -314,6 +308,7 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
         .accounts({
           client: publicKey,
           mint: mintPK,
+          arbiter: new PublicKey('11111111111111111111111111111111'), // Demo arbiter account, must sign in production
           clientTokenAccount: clientTA,
           job: jobPDA,
           vault: vaultPDA,
@@ -469,8 +464,8 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
           .rpc();
         toast.show('Payment released and reputation updated!', 'success');
       } else if (action === 'dispute') {
-        await program.methods.dispute()
-          .accounts({ user: publicKey, job: jobPDA })
+        await program.methods.disputeJob()
+          .accounts({ caller: publicKey, job: jobPDA })
           .preInstructions([computeBudgetIx, priorityFeeIx])
           .rpc();
         toast.show('Dispute initiated. Funds locked for Arbiter review.', 'info');
@@ -511,6 +506,39 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
   const myFreelancerJobs = jobs.filter(j => j.account.freelancer.toString() === publicKey?.toString());
   const myArbiterJobs = jobs.filter(j => j.account.arbiter.toString() === publicKey?.toString() && Object.keys(j.account.status)[0] === 'disputed');
   const openJobs = jobs.filter(j => Object.keys(j.account.status)[0] === 'open' && j.account.client.toString() !== publicKey?.toString());
+
+  const applicationsByJob = useMemo(() => {
+    const map: Record<string, any[]> = {};
+    for (const app of applications) {
+      const key = app.account.job.toString();
+      if (!map[key]) map[key] = [];
+      map[key].push(app);
+    }
+    return map;
+  }, [applications]);
+
+  const fetchApplicationsForJob = useCallback(async (jobPubkey: string) => {
+    if (!program) return;
+    try {
+      const coder = program.coder.accounts;
+      const rawApps = await connection.getProgramAccounts(program.programId, {
+        filters: [
+          { memcmp: coder.memcmp("jobApplication") },
+          { memcmp: { offset: 8 + 32, bytes: new PublicKey(jobPubkey).toBase58() } },
+        ]
+      });
+      const parsed: any[] = [];
+      for (const raw of rawApps) {
+        try {
+          parsed.push({ publicKey: raw.pubkey, account: coder.decode("jobApplication", raw.account.data) });
+        } catch {}
+      }
+      setApplications(prev => {
+        const filtered = prev.filter(a => a.account.job.toString() !== jobPubkey);
+        return [...filtered, ...parsed];
+      });
+    } catch {}
+  }, [program, connection]);
 
   const renderStatus = (statusObj: any) => {
     const status = Object.keys(statusObj)[0];
@@ -991,7 +1019,10 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
                                 </p>
                               </div>
                               <p style={{ fontWeight: 700, fontSize: '1.2rem', color: 'var(--primary-light)' }}>
-                                {formatAmount(job.account.amount, job.account.decimals)} Tokens
+                                {formatAmount(job.account.amount, getMintDecimals(job.account.mint.toString()))} Tokens
+                              </p>
+                              <p style={{ fontSize: '0.55rem', color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: 2 }}>
+                                Mint: {job.account.mint.toString().substring(0, 8)}...{job.account.mint.toString().slice(-4)}
                               </p>
 
                               {/* Milestone Progress Tracker */}
@@ -1006,7 +1037,7 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
                                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                             <div style={{ width: 6, height: 6, borderRadius: '50%', background: isReleased ? 'var(--secondary)' : 'var(--text-muted)' }} />
                                             <span style={{ fontSize: '0.7rem', color: isReleased ? 'white' : 'var(--text-muted)' }}>
-                                              #{idx + 1}: {formatAmount(amt, job.account.decimals)}
+                                              #{idx + 1}: {formatAmount(amt, getMintDecimals(job.account.mint.toString()))}
                                             </span>
                                           </div>
                                           {isClient && !isReleased && status !== 'completed' && (
@@ -1032,11 +1063,14 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
                               {isClient && status === 'open' && (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                   <button
-                                    onClick={() => setViewingAppsFor(viewingAppsFor === pid ? null : pid)}
+                                    onClick={() => {
+                                      if (viewingAppsFor !== pid) fetchApplicationsForJob(pid);
+                                      setViewingAppsFor(viewingAppsFor === pid ? null : pid);
+                                    }}
                                     className="btn-primary"
                                     style={{ background: 'rgba(59,130,246,0.2)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.3)' }}
                                   >
-                                    {applications.filter(a => a.account.job.toString() === pid).length} Applicants
+                                    {(applicationsByJob[pid]?.length || 0)} Applicants
                                   </button>
                                   <button onClick={() => handleAction(job, 'cancel')} disabled={!!processing} className="btn-danger" style={{ justifyContent: 'center' }}>
                                     {isProc ? <RefreshCw size={14} className="spin" /> : 'Cancel & Refund'}
@@ -1046,7 +1080,7 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
                                     <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
                                       <p style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' }}>Review Bids</p>
                                       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                        {applications.filter(a => a.account.job.toString() === pid).map(app => (
+                                        {(applicationsByJob[pid] || []).map(app => (
                                           <div key={app.publicKey.toString()} style={{ background: 'rgba(255,255,255,0.02)', padding: 10, borderRadius: 8, border: '1px solid var(--border)' }}>
                                             <p style={{ fontSize: '0.7rem', color: 'white', marginBottom: 4 }}>{app.account.message}</p>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1061,7 +1095,7 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
                                             </div>
                                           </div>
                                         ))}
-                                        {applications.filter(a => a.account.job.toString() === pid).length === 0 && (
+                                        {!(applicationsByJob[pid]?.length) && (
                                           <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'center' }}>No applicants yet</p>
                                         )}
                                       </div>
@@ -1188,7 +1222,7 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
                                     />
                                   </div>
                                   <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                                    Remaining {formatAmount(job.account.amount.sub(new anchor.BN(disputeSplit[pid] || 0)), job.account.decimals)} will return to Client.
+                                    Remaining {formatAmount(job.account.amount.sub(new anchor.BN(disputeSplit[pid] || 0)), getMintDecimals(job.account.mint.toString()))} will return to Client.
                                   </p>
                                   <button
                                     onClick={() => {
