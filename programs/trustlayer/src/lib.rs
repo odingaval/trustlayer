@@ -90,6 +90,13 @@ pub mod trustlayer {
         Ok(())
     }
 
+    pub fn update_profile(ctx: Context<UpdateProfile>, username: String, bio: String) -> Result<()> {
+        let profile = &mut ctx.accounts.profile;
+        profile.username = username;
+        profile.bio = bio;
+        Ok(())
+    }
+
     pub fn submit_work(ctx: Context<SubmitWork>, submission_link: String) -> Result<()> {
         let job = &mut ctx.accounts.job;
         require!(job.status == JobStatus::InProgress, ErrorCode::InvalidStatus);
@@ -537,6 +544,19 @@ pub struct InitializeProfile<'info> {
     )]
     pub profile: Account<'info, UserProfile>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct UpdateProfile<'info> {
+    #[account(mut)]
+    pub user: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [b"user_profile", user.key().as_ref()],
+        bump = profile.bump,
+        has_one = user,
+    )]
+    pub profile: Account<'info, UserProfile>,
 }
 #[derive(Accounts)]
 pub struct CancelJob<'info> {
