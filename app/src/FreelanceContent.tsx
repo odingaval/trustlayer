@@ -16,13 +16,14 @@ import {
 } from '@solana/spl-token';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Lock, RefreshCw, Layers, Briefcase, PlusCircle, Check, Coins, Wand2, Shield, User
+  Lock, RefreshCw, Layers, Briefcase, PlusCircle, Check, Coins, Wand2, Shield, User, ArrowLeft
 } from 'lucide-react';
 
+import { RoleSelector } from './RoleSelector';
 import idl from './trustlayer.json';
 import type { Trustlayer } from './trustlayer';
 
-export function FreelanceContent({ toast }: { toast: any }) {
+export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => void }) {
   const { connection } = useConnection();
   const { publicKey, signTransaction, signAllTransactions, sendTransaction } = useWallet();
   const anchorWallet = useAnchorWallet();
@@ -44,9 +45,15 @@ export function FreelanceContent({ toast }: { toast: any }) {
   const [viewingAppsFor, setViewingAppsFor] = useState<string | null>(null);
   const [applyingFor, setApplyingFor] = useState<string | null>(null);
   const [applyMessage, setApplyMessage] = useState('');
+  const [submittingWorkFor, setSubmittingWorkFor] = useState<string | null>(null);
+  const [submitLink, setSubmitLink] = useState('');
   const [updateMsg, setUpdateMsg] = useState<{ [key: string]: string }>({});
   const [disputeSplit, setDisputeSplit] = useState<{ [key: string]: string }>({});
   const [userProfile, setUserProfile] = useState<any>(null);
+  const [profileOverride, setProfileOverride] = useState<{ username: string; bio: string } | null>(null);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [editUsername, setEditUsername] = useState('');
+  const [editBio, setEditBio] = useState('');
   const [isProfileLoading, setIsProfileLoading] = useState(true);
   const [setupUsername, setSetupUsername] = useState('');
   const [setupBio, setSetupBio] = useState('');
@@ -77,14 +84,14 @@ export function FreelanceContent({ toast }: { toast: any }) {
       const coder = program.coder.accounts;
       const rawJobs = await connection.getProgramAccounts(program.programId, {
         filters: [
-          coder.memcmp("jobEscrow")
+          { memcmp: coder.memcmp("jobEscrow") }
         ]
       });
 
       const parsedJobs: any[] = [];
       for (const raw of rawJobs) {
         try {
-          const decoded = coder.decode("JobEscrow", raw.account.data);
+          const decoded = coder.decode("jobEscrow", raw.account.data);
           parsedJobs.push({
             publicKey: raw.pubkey,
             account: decoded
@@ -98,14 +105,14 @@ export function FreelanceContent({ toast }: { toast: any }) {
       // Fetch all raw program accounts for JobApplication
       const rawApps = await connection.getProgramAccounts(program.programId, {
         filters: [
-          coder.memcmp("jobApplication")
+          { memcmp: coder.memcmp("jobApplication") }
         ]
       });
 
       const parsedApps: any[] = [];
       for (const raw of rawApps) {
         try {
-          const decoded = coder.decode("JobApplication", raw.account.data);
+          const decoded = coder.decode("jobApplication", raw.account.data);
           parsedApps.push({
             publicKey: raw.pubkey,
             account: decoded
@@ -139,6 +146,14 @@ export function FreelanceContent({ toast }: { toast: any }) {
   const fetchProfile = useCallback(async () => {
     if (!program || !publicKey) return;
     try {
+      // Check local override first
+      const stored = localStorage.getItem(`profile_override_${publicKey.toString()}`);
+      if (stored) {
+        setProfileOverride(JSON.parse(stored));
+      } else {
+        setProfileOverride(null);
+      }
+
       const [profilePDA] = PublicKey.findProgramAddressSync(
         [Buffer.from('user_profile'), publicKey.toBuffer()],
         program.programId
@@ -153,6 +168,30 @@ export function FreelanceContent({ toast }: { toast: any }) {
     }
   }, [program, publicKey]);
 
+  const activeProfile = useMemo(() => {
+    if (profileOverride) {
+      return {
+        username: profileOverride.username,
+        bio: profileOverride.bio,
+        jobsCompleted: userProfile?.jobsCompleted || 0,
+        totalEarned: userProfile?.totalEarned || new anchor.BN(0)
+      };
+    }
+    return userProfile;
+  }, [profileOverride, userProfile]);
+
+  const handleSaveProfile = async (username: string, bio: string) => {
+    if (!publicKey) return;
+    try {
+      localStorage.setItem(`profile_override_${publicKey.toString()}`, JSON.stringify({ username, bio }));
+      setProfileOverride({ username, bio });
+      toast.show('Profile updated successfully!', 'success');
+      setIsEditingProfile(false);
+    } catch (err: any) {
+      toast.show('Failed to save profile: ' + err.message, 'error');
+    }
+  };
+
   useEffect(() => {
     if (program && publicKey) {
       fetchJobs();
@@ -162,6 +201,7 @@ export function FreelanceContent({ toast }: { toast: any }) {
       setJobs([]);
       setTokenBalance(null);
       setUserProfile(null);
+      setProfileOverride(null);
     }
   }, [publicKey, program, fetchProfile]); // Auto-refresh everything when wallet changes
 
@@ -325,18 +365,16 @@ export function FreelanceContent({ toast }: { toast: any }) {
     setProcessing(id);
     try {
       const jobAccount = job.account;
-      const clientPK = jobAccount.client;
       const mintPK = jobAccount.mint;
-      const jobId = jobAccount.jobId;
-
-      const [jobPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('job_v3'), clientPK.toBuffer(), jobId.toArrayLike(Buffer, 'le', 8)],
-        program.programId
-      );
+      const jobPDA = job.publicKey;
       const [vaultPDA] = PublicKey.findProgramAddressSync(
         [Buffer.from('vault'), jobPDA.toBuffer()],
         program.programId
       );
+
+      // Define compute budget and priority fees globally to speed up all actions on Devnet
+      const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 });
+      const priorityFeeIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000 });
 
       if (action === 'apply') {
         const message = arg as string;
@@ -352,7 +390,9 @@ export function FreelanceContent({ toast }: { toast: any }) {
             freelancer: publicKey,
             job: job.publicKey,
             application: appPDA,
-          } as any).rpc();
+          } as any)
+          .preInstructions([computeBudgetIx, priorityFeeIx])
+          .rpc();
         toast.show('Application sent!', 'success');
         setApplyingFor(null);
         setApplyMessage('');
@@ -363,15 +403,21 @@ export function FreelanceContent({ toast }: { toast: any }) {
             client: publicKey,
             job: job.publicKey,
             application: app.publicKey,
-          } as any).rpc();
+          } as any)
+          .preInstructions([computeBudgetIx, priorityFeeIx])
+          .rpc();
         toast.show('Freelancer hired!', 'success');
         setViewingAppsFor(null);
       } else if (action === 'submit') {
-        const link = prompt("Please provide a link to your work (e.g. GitHub, Google Drive):");
+        const link = arg as string;
         if (!link) { setProcessing(null); return; }
         await program.methods.submitWork(link)
-          .accounts({ freelancer: publicKey, job: jobPDA } as any).rpc();
+          .accounts({ freelancer: publicKey, job: jobPDA } as any)
+          .preInstructions([computeBudgetIx, priorityFeeIx])
+          .rpc();
         toast.show('Work submitted for review!', 'success');
+        setSubmittingWorkFor(null);
+        setSubmitLink('');
       } else if (action === 'release_milestone') {
         const milestoneIdx = arg as number;
         const freelancerPK = jobAccount.freelancer;
@@ -385,20 +431,26 @@ export function FreelanceContent({ toast }: { toast: any }) {
             client: publicKey, freelancer: freelancerPK, job: jobPDA,
             mint: mintPK, freelancerTokenAccount: freelancerTA, vault: vaultPDA,
             freelancerProfile: freelancerProfilePDA
-          } as any).rpc();
+          } as any)
+          .preInstructions([computeBudgetIx, priorityFeeIx])
+          .rpc();
         toast.show('Milestone payment released!', 'success');
       } else if (action === 'post_update') {
         const updateText = arg as string;
         const timestamp = Math.floor(Date.now() / 1000);
+        const timestampArr = new Uint8Array(8);
+        new DataView(timestampArr.buffer).setUint32(0, timestamp, true);
         const [logPDA] = PublicKey.findProgramAddressSync(
-          [Buffer.from('log'), jobPDA.toBuffer(), publicKey.toBuffer(), new anchor.BN(timestamp).toArrayLike(Buffer, 'le', 8)],
+          [Buffer.from('log'), jobPDA.toBuffer(), publicKey.toBuffer(), timestampArr],
           program.programId
         );
         await program.methods.postProjectUpdate(updateText, new anchor.BN(timestamp))
           .accounts({
             author: publicKey, job: jobPDA, log: logPDA,
             systemProgram: SystemProgram.programId
-          } as any).rpc();
+          } as any)
+          .preInstructions([computeBudgetIx, priorityFeeIx])
+          .rpc();
         toast.show('Update posted to chain!', 'success');
       } else if (action === 'approve') {
         const freelancerPK = jobAccount.freelancer;
@@ -412,10 +464,15 @@ export function FreelanceContent({ toast }: { toast: any }) {
             client: publicKey, freelancer: freelancerPK, job: jobPDA,
             mint: mintPK, freelancerTokenAccount: freelancerTA, vault: vaultPDA,
             freelancerProfile: freelancerProfilePDA
-          } as any).rpc();
+          } as any)
+          .preInstructions([computeBudgetIx, priorityFeeIx])
+          .rpc();
         toast.show('Payment released and reputation updated!', 'success');
       } else if (action === 'dispute') {
-        await program.methods.dispute().accounts({ user: publicKey, job: jobPDA }).rpc();
+        await program.methods.dispute()
+          .accounts({ user: publicKey, job: jobPDA })
+          .preInstructions([computeBudgetIx, priorityFeeIx])
+          .rpc();
         toast.show('Dispute initiated. Funds locked for Arbiter review.', 'info');
       } else if (action === 'resolve_dispute') {
         const { freelancerAward, clientAward } = arg as { freelancerAward: number, clientAward: number };
@@ -431,12 +488,16 @@ export function FreelanceContent({ toast }: { toast: any }) {
             job: jobPDA, mint: mintPK, freelancerTokenAccount: freelancerTA,
             clientTokenAccount: clientTA, vault: vaultPDA, freelancerProfile: freelancerProfilePDA,
             tokenProgram: TOKEN_PROGRAM_ID
-          } as any).rpc();
+          } as any)
+          .preInstructions([computeBudgetIx, priorityFeeIx])
+          .rpc();
         toast.show('Dispute settled and funds distributed!', 'success');
       } else if (action === 'cancel') {
         const clientTA = getAssociatedTokenAddressSync(mintPK, publicKey);
         await program.methods.cancelJob()
-          .accounts({ client: publicKey, job: jobPDA, mint: mintPK, clientTokenAccount: clientTA, vault: vaultPDA } as any).rpc();
+          .accounts({ client: publicKey, job: jobPDA, mint: mintPK, clientTokenAccount: clientTA, vault: vaultPDA } as any)
+          .preInstructions([computeBudgetIx, priorityFeeIx])
+          .rpc();
         toast.show('Job cancelled & refunded!', 'success');
       }
 
@@ -465,67 +526,164 @@ export function FreelanceContent({ toast }: { toast: any }) {
     return <span style={{ color: mapped.color, fontWeight: 700, fontSize: '0.8rem', background: 'rgba(255,255,255,0.05)', padding: '4px 8px', borderRadius: 6 }}>{mapped.label}</span>;
   };
 
+  const isClient = viewMode === 'hire';
+  const accent = isClient ? '#7B3FE4' : '#10B981';
+  const accentLight = isClient ? '#A78BFA' : '#6EE7B7';
+  const accentBg = isClient ? 'rgba(123, 63, 228, 0.08)' : 'rgba(16, 185, 129, 0.08)';
+  const accentBorder = isClient ? 'rgba(123, 63, 228, 0.2)' : 'rgba(16, 185, 129, 0.2)';
+
+  // Show role selector if user has connected but not picked a role yet
+  const [roleChosen, setRoleChosen] = useState(false);
+
+  if (!roleChosen) {
+    return <RoleSelector onSelect={(role) => { setViewMode(role); setActiveTab(role === 'hire' ? 'client' : 'market'); setRoleChosen(true); }} />;
+  }
+
   return (
     <>
       <div className="mesh-bg" />
+      <div className="grid-overlay" />
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 24px', paddingBottom: 60, position: 'relative' }}>
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '32px 0 56px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '28px 0 48px', borderBottom: `1px solid ${accentBorder}`, marginBottom: 40 }}>
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer' }}
+            onClick={onBack}
+            title="Back to Home"
+            onMouseEnter={e => (e.currentTarget.style.opacity = '0.75')}
+            onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+          >
             <img
               src="/logo.png"
               alt="TrustLayer Logo"
               style={{ width: 44, height: 44, borderRadius: 12, objectFit: 'cover' }}
             />
             <div>
-              <h1 style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1 }}>
-                Trust<span className="gradient-text">Layer</span> Gigs
-              </h1>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <h1 style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1 }}>
+                  Trust<span className="gradient-text">Layer</span> Gigs
+                </h1>
+                <span style={{ fontSize: '0.6rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', padding: '3px 8px', borderRadius: 6, background: 'rgba(251, 191, 36, 0.1)', color: '#fbbf24', border: '1px solid rgba(251, 191, 36, 0.25)' }}>
+                  Devnet · Test Only
+                </span>
+              </div>
               <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 2 }}>
                 Freelance Escrow Dashboard
               </p>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {/* Role Toggle Switch */}
-            <div style={{ display: 'flex', background: 'rgba(255,255,255,0.03)', padding: 4, borderRadius: 12, border: '1px solid var(--border)', marginRight: 10 }}>
+            {/* Role Badge */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px', borderRadius: 10, background: accentBg, border: `1px solid ${accentBorder}`, marginRight: 8 }}>
+              {isClient ? <PlusCircle size={14} color={accentLight} /> : <Briefcase size={14} color={accentLight} />}
+              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: accentLight }}>
+                {isClient ? 'Client Mode' : 'Freelancer Mode'}
+              </span>
               <button
-                onClick={() => { setViewMode('hire'); setActiveTab('client'); }}
-                style={{
-                  padding: '6px 16px', borderRadius: 8, border: 'none', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer',
-                  background: viewMode === 'hire' ? 'var(--solana-purple)' : 'transparent',
-                  color: 'white',
-                  transition: 'all 0.2s'
-                }}
+                onClick={() => setRoleChosen(false)}
+                style={{ marginLeft: 4, background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.7rem', padding: 0, display: 'flex', alignItems: 'center', gap: 3 }}
+                title="Switch role"
+                onMouseEnter={e => e.currentTarget.style.color = 'white'}
+                onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
               >
-                I want to Hire
-              </button>
-              <button
-                onClick={() => { setViewMode('work'); setActiveTab('market'); }}
-                style={{
-                  padding: '6px 16px', borderRadius: 8, border: 'none', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer',
-                  background: viewMode === 'work' ? 'var(--solana-green)' : 'transparent',
-                  color: 'white',
-                  transition: 'all 0.2s'
-                }}
-              >
-                I want to Work
+                <ArrowLeft size={11} /> Switch
               </button>
             </div>
 
-            {program && userProfile && (
+            {program && activeProfile && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginRight: 16, borderRight: '1px solid var(--border)', paddingRight: 16 }}>
-                <div style={{ textAlign: 'right' }}>
-                  <p style={{ fontSize: '0.85rem', fontWeight: 700, color: 'white' }}>{userProfile.username}</p>
-                  <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                    {viewMode === 'hire' 
-                      ? `Client · ${myClientJobs.length} Gigs Posted` 
-                      : `Freelancer · ${userProfile.jobsCompleted} Completed · ${userProfile.totalEarned.toString()} Earned`
-                    }
-                  </p>
-                </div>
-                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', fontWeight: 800 }}>
-                  {userProfile.username[0].toUpperCase()}
-                </div>
+                {isEditingProfile ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="text"
+                      value={editUsername}
+                      onChange={(e) => setEditUsername(e.target.value)}
+                      placeholder="Username"
+                      style={{
+                        background: 'rgba(0,0,0,0.4)',
+                        border: '1px solid var(--secondary)',
+                        borderRadius: 4,
+                        padding: '4px 8px',
+                        fontSize: '0.8rem',
+                        color: 'white',
+                        width: 120,
+                        height: 28,
+                      }}
+                    />
+                    <button
+                      onClick={() => handleSaveProfile(editUsername, editBio)}
+                      className="btn-primary"
+                      style={{
+                        padding: 0,
+                        width: 28,
+                        height: 28,
+                        background: 'var(--solana-green)',
+                        borderRadius: 4,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minWidth: 28
+                      }}
+                    >
+                      <Check size={14} />
+                    </button>
+                    <button
+                      onClick={() => setIsEditingProfile(false)}
+                      className="btn-ghost"
+                      style={{
+                        padding: 0,
+                        width: 28,
+                        height: 28,
+                        background: 'rgba(255,255,255,0.05)',
+                        borderRadius: 4,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minWidth: 28
+                      }}
+                    >
+                      <span style={{ fontSize: '0.8rem', fontWeight: 800 }}>×</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+                        <p style={{ fontSize: '0.85rem', fontWeight: 700, color: 'white' }}>{activeProfile.username}</p>
+                        <button
+                          onClick={() => {
+                            setEditUsername(activeProfile.username);
+                            setEditBio(activeProfile.bio || '');
+                            setIsEditingProfile(true);
+                          }}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            padding: 0,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            opacity: 0.5,
+                            color: 'white',
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+                          onMouseLeave={(e) => e.currentTarget.style.opacity = '0.5'}
+                          title="Edit Profile Name"
+                        >
+                          <Wand2 size={12} />
+                        </button>
+                      </div>
+                      <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                        {viewMode === 'hire' 
+                          ? `Client · ${myClientJobs.length} Gigs Posted` 
+                          : `Freelancer · ${activeProfile.jobsCompleted} Completed · ${activeProfile.totalEarned.toString()} Earned`
+                        }
+                      </p>
+                    </div>
+                    <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', fontWeight: 800 }}>
+                      {activeProfile.username[0].toUpperCase()}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -617,13 +775,20 @@ export function FreelanceContent({ toast }: { toast: any }) {
               </div>
               <div style={{ height: 1, background: 'var(--border)', margin: '18px 0' }} />
 
-              {!publicKey ? (
-                <div style={{ padding: '32px 16px', textAlign: 'center' }}>
-                  <Lock size={32} color="var(--text-muted)" style={{ margin: '0 auto 12px', opacity: 0.3, display: 'block' }} />
-                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Connect your wallet to post a gig.</p>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              <div style={{ position: 'relative' }}>
+                {!publicKey && (
+                  <div style={{ position: 'absolute', inset: -8, backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', background: 'rgba(18,18,20,0.75)', zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', borderRadius: 16, border: '1px solid rgba(255,255,255,0.05)', padding: 24 }}>
+                    <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(123, 63, 228, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16, border: '1px solid rgba(123, 63, 228, 0.25)', boxShadow: '0 0 24px rgba(123, 63, 228, 0.2)' }}>
+                      <Lock size={24} color="#A78BFA" />
+                    </div>
+                    <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 6, color: 'white', textAlign: 'center' }}>Connect Your Wallet</h3>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', textAlign: 'center', maxWidth: 230, lineHeight: 1.5, marginBottom: 20 }}>You'll need a Solana wallet like <strong style={{ color: 'white' }}>Phantom</strong> or <strong style={{ color: 'white' }}>Solflare</strong>. It's free and takes 2 minutes to set up.</p>
+                    <WalletMultiButton />
+                    <a href="https://phantom.app" target="_blank" rel="noopener noreferrer" style={{ marginTop: 12, color: 'var(--text-muted)', fontSize: '0.75rem', textDecoration: 'underline', cursor: 'pointer' }}>Don't have a wallet? Get Phantom →</a>
+                  </div>
+                )}
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 18, filter: !publicKey ? 'grayscale(0.8) opacity(0.5)' : 'none', pointerEvents: !publicKey ? 'none' : 'auto', transition: 'all 0.4s ease' }}>
                   <div>
                     <label className="label">Job Title</label>
                     <input type="text" placeholder="e.g. Design a Logo" value={title} onChange={e => setTitle(e.target.value)} />
@@ -634,25 +799,33 @@ export function FreelanceContent({ toast }: { toast: any }) {
                       placeholder="Describe what needs to be done..."
                       value={description}
                       onChange={e => setDescription(e.target.value)}
-                      style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 10, padding: 12, color: 'white', fontSize: '0.85rem', minHeight: 80, outline: 'none' }}
+                      style={{ width: '100%', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: 10, padding: 12, color: 'white', fontSize: '0.85rem', minHeight: 80, outline: 'none' }}
                     />
                   </div>
                   <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <label className="label" style={{ marginBottom: 0 }}>Payment Token Mint</label>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        {tokenBalance !== null && (
-                          <div style={{ fontSize: '0.65rem', color: 'var(--secondary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <Coins size={10} /> Bal: {tokenBalance}
-                          </div>
-                        )}
-                        <button onClick={handleCreateTestMint} disabled={minting} className="btn-ghost" style={{ fontSize: '0.65rem', padding: '2px 8px', height: 'auto', gap: 4 }}>
-                          {minting ? <RefreshCw size={10} className="spin" /> : <Wand2 size={10} />}
-                          Auto-Setup
-                        </button>
-                      </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <label className="label" style={{ marginBottom: 0 }}>Payment Token</label>
+                      {tokenBalance !== null && (
+                        <div style={{ fontSize: '0.65rem', color: 'var(--secondary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <Coins size={10} /> Balance: {tokenBalance}
+                        </div>
+                      )}
                     </div>
-                    <input type="text" placeholder="USDC Mint Address..." value={mint} onChange={e => setMint(e.target.value)} className="mono" />
+                    {/* Auto-Setup prominent CTA */}
+                    {!mint && (
+                      <button
+                        onClick={handleCreateTestMint}
+                        disabled={minting}
+                        style={{ width: '100%', marginBottom: 10, padding: '12px', borderRadius: 10, border: '1px dashed rgba(167, 139, 250, 0.4)', background: 'rgba(123, 63, 228, 0.06)', color: '#A78BFA', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, transition: 'all 0.2s' }}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(123,63,228,0.12)'; e.currentTarget.style.borderColor = 'rgba(167,139,250,0.6)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(123,63,228,0.06)'; e.currentTarget.style.borderColor = 'rgba(167,139,250,0.4)'; }}
+                      >
+                        {minting ? <RefreshCw size={14} className="spin" /> : <Wand2 size={14} />}
+                        {minting ? 'Creating test tokens...' : 'Auto-create test tokens (recommended)'}
+                      </button>
+                    )}
+                    <input type="text" placeholder={mint ? mint : 'Or paste a token mint address...'} value={mint} onChange={e => setMint(e.target.value)} style={{ fontFamily: mint ? 'monospace' : 'inherit', fontSize: mint ? '0.75rem' : '0.88rem' }} />
+                    {!mint && <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 6 }}>On testnet — no real money involved. Auto-create creates free test tokens instantly.</p>}
                   </div>
                   <div>
                     <label className="label">Budget Amount</label>
@@ -711,7 +884,7 @@ export function FreelanceContent({ toast }: { toast: any }) {
                     {loading ? 'Funding Escrow…' : !program ? 'Awaiting wallet…' : 'Fund Job'}
                   </button>
                 </div>
-              )}
+              </div>
             </motion.div>
           )}
 
@@ -920,17 +1093,42 @@ export function FreelanceContent({ toast }: { toast: any }) {
                                   )}
                                 </div>
                               )}
-                              {isFreelancer && status === 'inprogress' && (
-                                <button onClick={() => handleAction(job, 'submit')} disabled={!!processing} className="btn-primary" style={{ justifyContent: 'center', background: 'var(--secondary)' }}>
-                                  {isProc ? <RefreshCw size={14} className="spin" /> : 'Submit Work'}
-                                </button>
+                              {isFreelancer && status === 'inProgress' && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                  {submittingWorkFor === pid ? (
+                                    <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                      <input
+                                        type="text"
+                                        placeholder="Enter link to your completed work (e.g. GitHub, Drive)..."
+                                        value={submitLink}
+                                        onChange={(e) => setSubmitLink(e.target.value)}
+                                        style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', color: 'white', fontSize: '0.8rem', outline: 'none' }}
+                                      />
+                                      <div style={{ display: 'flex', gap: 8 }}>
+                                        <button 
+                                          onClick={() => handleAction(job, 'submit', submitLink)} 
+                                          disabled={!submitLink || !!processing} 
+                                          className="btn-primary" 
+                                          style={{ flex: 1, justifyContent: 'center', background: 'var(--secondary)' }}
+                                        >
+                                          {isProc ? <RefreshCw size={14} className="spin" /> : 'Confirm Submission'}
+                                        </button>
+                                        <button onClick={() => setSubmittingWorkFor(null)} className="btn-secondary" style={{ padding: '0 12px' }}>Cancel</button>
+                                      </div>
+                                    </motion.div>
+                                  ) : (
+                                    <button onClick={() => { setSubmittingWorkFor(pid); setSubmitLink(''); }} disabled={!!processing} className="btn-primary" style={{ justifyContent: 'center', background: 'var(--secondary)' }}>
+                                      Submit Work
+                                    </button>
+                                  )}
+                                </div>
                               )}
-                              {isClient && status === 'inreview' && (
+                              {isClient && status === 'inReview' && (
                                 <button onClick={() => handleAction(job, 'approve')} disabled={!!processing} className="btn-primary" style={{ justifyContent: 'center', background: '#10b981' }}>
                                   {isProc ? <RefreshCw size={14} className="spin" /> : 'Approve & Release Payment'}
                                 </button>
                               )}
-                              {(isClient || isFreelancer) && (status === 'inprogress' || status === 'inreview') && (
+                              {(isClient || isFreelancer) && (status === 'inProgress' || status === 'inReview') && (
                                 <button 
                                   onClick={() => {
                                     if(window.confirm('Are you sure? This will lock funds and alert the Arbiter.')) {
