@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 
-declare_id!("8cChvKd5QmU6CyHcaXKiYgBfFWkX4cQaYbh6FAYDCBwk");
+declare_id!("DA5qsutDnzrU7ErRWh8stvKC7u1BUYzJec8VvNwxqSzU");
 
 #[program]
 pub mod trustlayer {
@@ -11,7 +11,6 @@ pub mod trustlayer {
         ctx: Context<InitializeJob>,
         job_id: u64,
         amount: u64,
-        arbiter: Pubkey,
         title: String,
         description: String,
         milestone_amounts: Option<Vec<u64>>,
@@ -19,7 +18,7 @@ pub mod trustlayer {
     ) -> Result<()> {
         let job = &mut ctx.accounts.job;
         job.client = ctx.accounts.client.key();
-        job.arbiter = arbiter;
+        job.arbiter = ctx.accounts.arbiter.key();
         job.freelancer = Pubkey::default();
         job.mint = ctx.accounts.mint.key();
         job.amount = amount;
@@ -30,14 +29,23 @@ pub mod trustlayer {
         job.bump = ctx.bumps.job;
         job.decimals = decimals;
 
-        // Initialize milestones if provided
+        require!(
+            ctx.accounts.mint.mint_authority.is_none() &&
+            ctx.accounts.mint.freeze_authority.is_none(),
+            ErrorCode::UnsupportedMint
+        );
+
         if let Some(amounts) = milestone_amounts {
             let count = amounts.len().min(5);
             job.milestone_count = count as u8;
+            let mut total: u64 = 0;
             for i in 0..count {
-                job.milestone_amounts[i] = amounts[i];
+                let amt = amounts[i];
+                job.milestone_amounts[i] = amt;
                 job.milestone_status[i] = 0;
+                total = total.checked_add(amt).ok_or_else(|| error!(ErrorCode::InvalidAmount))?;
             }
+            require!(total == amount, ErrorCode::InvalidAmount);
         } else {
             job.milestone_count = 0;
         }
@@ -56,6 +64,10 @@ pub mod trustlayer {
     }
 
     pub fn apply_for_job(ctx: Context<ApplyForJob>, message: String) -> Result<()> {
+        require!(
+            ctx.accounts.freelancer.key() != ctx.accounts.job.client,
+            ErrorCode::RoleConflict
+        );
         let application = &mut ctx.accounts.application;
         application.job = ctx.accounts.job.key();
         application.freelancer = ctx.accounts.freelancer.key();
@@ -71,6 +83,10 @@ pub mod trustlayer {
         
         require!(job.status == JobStatus::Open, ErrorCode::InvalidStatus);
         require!(application.status == ApplicationStatus::Pending, ErrorCode::InvalidStatus);
+        require!(
+            ctx.accounts.client.key() != application.freelancer,
+            ErrorCode::RoleConflict
+        );
 
         job.status = JobStatus::InProgress;
         job.freelancer = application.freelancer;
@@ -107,7 +123,7 @@ pub mod trustlayer {
         Ok(())
     }
 
-    pub fn release_milestone(ctx: Context<ApproveAndRelease>, index: u8) -> Result<()> {
+    pub fn release_milestone(ctx: Context<ReleaseMilestone>, index: u8) -> Result<()> {
         let job = &mut ctx.accounts.job;
         let idx = index as usize;
         
@@ -126,12 +142,45 @@ pub mod trustlayer {
             let profile = &mut ctx.accounts.freelancer_profile;
             profile.jobs_completed += 1;
             profile.total_earned += amount;
+
+            // Sweep any remaining vault balance back to client and close vault
+            let vault_balance = ctx.accounts.vault.amount;
+            if vault_balance > 0 {
+                let cpi_accounts = Transfer {
+                    from: ctx.accounts.vault.to_account_info(),
+                    to: ctx.accounts.client_token_account.to_account_info(),
+                    authority: job.to_account_info(),
+                };
+                let cpi_program = ctx.accounts.token_program.to_account_info();
+                let signer_seeds = &[
+                    b"job_v3",
+                    job.client.as_ref(),
+                    &job.job_id.to_le_bytes(),
+                    &[job.bump],
+                ];
+                token::transfer(
+                    CpiContext::new_with_signer(cpi_program.clone(), cpi_accounts, &[&signer_seeds[..]]),
+                    vault_balance,
+                )?;
+            }
+            // Close vault (destination: client system account)
+            let close_accounts = token::CloseAccount {
+                account: ctx.accounts.vault.to_account_info(),
+                destination: ctx.accounts.client.to_account_info(),
+                authority: job.to_account_info(),
+            };
+            let cpi_program = ctx.accounts.token_program.to_account_info();
+            token::close_account(CpiContext::new_with_signer(cpi_program, close_accounts, &[&[
+                b"job_v3",
+                job.client.as_ref(),
+                &job.job_id.to_le_bytes(),
+                &[job.bump],
+            ][..]]))?;
         } else {
             // Just update earnings for the partial release
             let profile = &mut ctx.accounts.freelancer_profile;
             profile.total_earned += amount;
         }
-
         let client_key = job.client;
         let job_id_bytes = job.job_id.to_le_bytes();
         let bump = job.bump;
@@ -163,7 +212,7 @@ pub mod trustlayer {
             ErrorCode::InvalidStatus
         );
 
-        let amount = job.amount;
+        let amount = ctx.accounts.vault.amount;
         job.status = JobStatus::Completed;
         
         // Update freelancer profile stats
@@ -209,7 +258,7 @@ pub mod trustlayer {
         let job = &ctx.accounts.job;
         require!(job.status == JobStatus::Open, ErrorCode::CannotCancel);
 
-        let amount = job.amount;
+        let amount = ctx.accounts.vault.amount;
         let client_key = job.client;
         let job_id_bytes = job.job_id.to_le_bytes();
         let bump = job.bump;
@@ -256,8 +305,8 @@ pub mod trustlayer {
 
     pub fn resolve_dispute(
         ctx: Context<ResolveDispute>,
-        client_award: u64,
         freelancer_award: u64,
+        client_award: u64,
     ) -> Result<()> {
         let job = &mut ctx.accounts.job;
         require!(job.status == JobStatus::Disputed, ErrorCode::InvalidStatus);
@@ -298,6 +347,18 @@ pub mod trustlayer {
             token::transfer(cpi_ctx, client_award)?;
         }
 
+        // Sweep surplus to client (compute before CPI since vault.amount becomes stale)
+        let surplus = job.amount.saturating_sub(freelancer_award + client_award);
+        if surplus > 0 {
+            let cpi_accounts = Transfer {
+                from: ctx.accounts.vault.to_account_info(),
+                to: ctx.accounts.client_token_account.to_account_info(),
+                authority: job.to_account_info(),
+            };
+            let cpi_ctx = CpiContext::new_with_signer(cpi_program.clone(), cpi_accounts, signer_seeds);
+            token::transfer(cpi_ctx, surplus)?;
+        }
+
         // Close vault
         let close_accounts = token::CloseAccount {
             account: ctx.accounts.vault.to_account_info(),
@@ -311,9 +372,15 @@ pub mod trustlayer {
     }
 
     pub fn post_project_update(ctx: Context<PostProjectUpdate>, content: String, timestamp: i64) -> Result<()> {
+        let job = &ctx.accounts.job;
+        let author = ctx.accounts.author.key();
+        require!(
+            author == job.client || author == job.freelancer || author == job.arbiter,
+            ErrorCode::Unauthorized
+        );
         let log = &mut ctx.accounts.log;
         log.job = ctx.accounts.job.key();
-        log.author = ctx.accounts.author.key();
+        log.author = author;
         log.content = content;
         log.timestamp = timestamp;
         Ok(())
@@ -406,6 +473,7 @@ pub struct InitializeJob<'info> {
     #[account(mut)]
     pub client: Signer<'info>,
     pub mint: Account<'info, Mint>,
+    pub arbiter: Signer<'info>,
 
     #[account(
         init_if_needed,
@@ -501,6 +569,15 @@ pub struct ApproveAndRelease<'info> {
     )]
     pub job: Account<'info, JobEscrow>,
 
+    // Client's token account used for sweeping surplus funds on milestone finalization
+    #[account(
+        init_if_needed,
+        payer = client,
+        associated_token::mint = mint,
+        associated_token::authority = client,
+    )]
+    pub client_token_account: Account<'info, TokenAccount>,
+
     pub mint: Account<'info, Mint>,
 
     #[account(
@@ -519,9 +596,66 @@ pub struct ApproveAndRelease<'info> {
     pub vault: Account<'info, TokenAccount>,
 
     #[account(
-        mut,
+        init_if_needed,
+        payer = client,
+        space = 8 + UserProfile::INIT_SPACE,
         seeds = [b"user_profile", job.freelancer.as_ref()],
-        bump = freelancer_profile.bump,
+        bump,
+    )]
+    pub freelancer_profile: Account<'info, UserProfile>,
+
+    pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, anchor_spl::associated_token::AssociatedToken>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct ReleaseMilestone<'info> {
+    #[account(mut)]
+    pub client: Signer<'info>,
+
+    /// CHECK: We don't strictly need the freelancer to sign, but we need their account
+    #[account(address = job.freelancer)]
+    pub freelancer: UncheckedAccount<'info>,
+
+    #[account(
+        mut,
+        has_one = client,
+    )]
+    pub job: Account<'info, JobEscrow>,
+
+    #[account(
+        init_if_needed,
+        payer = client,
+        associated_token::mint = mint,
+        associated_token::authority = client,
+    )]
+    pub client_token_account: Account<'info, TokenAccount>,
+
+    pub mint: Account<'info, Mint>,
+
+    #[account(
+        init_if_needed,
+        payer = client,
+        associated_token::mint = mint,
+        associated_token::authority = freelancer,
+    )]
+    pub freelancer_token_account: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        seeds = [b"vault", job.key().as_ref()],
+        bump,
+    )]
+    pub vault: Account<'info, TokenAccount>,
+
+    #[account(
+        init_if_needed,
+        payer = client,
+        space = 8 + UserProfile::INIT_SPACE,
+        seeds = [b"user_profile", job.freelancer.as_ref()],
+        bump,
     )]
     pub freelancer_profile: Account<'info, UserProfile>,
 
@@ -610,11 +744,17 @@ pub struct ResolveDispute<'info> {
     pub arbiter: Signer<'info>,
 
     /// CHECK: Safe
-    #[account(mut)]
+    #[account(
+        mut,
+        address = job.client,
+    )]
     pub client: SystemAccount<'info>,
 
     /// CHECK: Safe
-    #[account(mut)]
+    #[account(
+        mut,
+        address = job.freelancer,
+    )]
     pub freelancer: SystemAccount<'info>,
 
     #[account(
@@ -664,6 +804,12 @@ pub enum ErrorCode {
     CannotCancel,
     #[msg("Invalid dispute award amount")]
     InvalidAmount,
+    #[msg("Cannot apply to or hire yourself")]
+    RoleConflict,
+    #[msg("Mint must not have an authority or freeze authority")]
+    UnsupportedMint,
+    #[msg("Arbiter must sign")]
+    InvalidArbiter,
 }
 
 #[derive(Accounts)]

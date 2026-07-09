@@ -1,10 +1,13 @@
 import { useMemo, Suspense, lazy } from 'react';
 import { Buffer } from 'buffer';
+import { EventEmitter } from 'events';
+import process from 'process';
 
-// Ensure Buffer is global before ANY other Solana imports
-window.Buffer = (window as any).Buffer || Buffer;
-window.global = (window as any).global || window;
-window.process = (window as any).process || { env: {} };
+// Ensure globals are set before any Solana imports
+if (!window.Buffer) window.Buffer = Buffer;
+if (!window.global) window.global = window;
+if (!window.EventEmitter) window.EventEmitter = EventEmitter as any;
+if (!window.process) window.process = process;
 
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';

@@ -1,20 +1,25 @@
 import * as anchor from "@coral-xyz/anchor";
-import { Program } from "@coral-xyz/anchor";
+import { Program, AnchorProvider } from "@coral-xyz/anchor";
 import { Trustlayer } from "../target/types/trustlayer";
+import idl from "../target/idl/trustlayer.json";
 import {
   createMint,
   getOrCreateAssociatedTokenAccount,
   mintTo,
+  setAuthority,
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
+  AuthorityType,
 } from "@solana/spl-token";
 import { expect } from "chai";
+import { PublicKey, Keypair } from "@solana/web3.js";
 
 describe("trustlayer", () => {
-  anchor.setProvider(anchor.AnchorProvider.env());
-
-  const program = anchor.workspace.Trustlayer as Program<Trustlayer>;
-  const provider = anchor.getProvider() as anchor.AnchorProvider;
+  const provider = AnchorProvider.env();
+  anchor.setProvider(provider);
+  // Deployed program ID on local validator — override IDL address for local testing
+  const LOCAL_PROGRAM_ID = new PublicKey("DA5qsutDnzrU7ErRWh8stvKC7u1BUYzJec8VvNwxqSzU");
+  const program = new Program({ ...idl, address: LOCAL_PROGRAM_ID.toBase58() } as any, provider) as Program<Trustlayer>;
   const connection = provider.connection;
 
   // Participants
@@ -32,7 +37,7 @@ describe("trustlayer", () => {
   // Derive PDAs
   const getJobPDA = (clientKey: anchor.web3.PublicKey, jobId: anchor.BN) => {
     const [pda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("job"), clientKey.toBuffer(), jobId.toArrayLike(Buffer, "le", 8)],
+      [Buffer.from("job_v3"), clientKey.toBuffer(), jobId.toArrayLike(Buffer, "le", 8)],
       program.programId
     );
     return pda;
@@ -41,6 +46,22 @@ describe("trustlayer", () => {
   const getVaultPDA = (jobPDA: anchor.web3.PublicKey) => {
     const [pda] = anchor.web3.PublicKey.findProgramAddressSync(
       [Buffer.from("vault"), jobPDA.toBuffer()],
+      program.programId
+    );
+    return pda;
+  };
+
+  const getApplicationPDA = (jobPDA: anchor.web3.PublicKey, freelancerKey: anchor.web3.PublicKey) => {
+    const [pda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("application"), jobPDA.toBuffer(), freelancerKey.toBuffer()],
+      program.programId
+    );
+    return pda;
+  };
+
+  const getProfilePDA = (user: anchor.web3.PublicKey) => {
+    const [pda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("user_profile"), user.toBuffer()],
       program.programId
     );
     return pda;
@@ -65,8 +86,11 @@ describe("trustlayer", () => {
       await getOrCreateAssociatedTokenAccount(connection, freelancer, mint, freelancer.publicKey)
     ).address;
 
-    // Fund client with tokens
+    // Fund client with tokens (before revoking mint authority)
     await mintTo(connection, client, mint, clientTokenAccount, client, 5000);
+
+    // Revoke mint authority so initialize_job passes UnsupportedMint check
+    await setAuthority(connection, client, mint, client.publicKey, AuthorityType.MintTokens, null);
   });
 
   it("initialize_job: client creates a job and funds the vault", async () => {
@@ -74,10 +98,11 @@ describe("trustlayer", () => {
     const vaultPDA = getVaultPDA(jobPDA);
 
     await program.methods
-      .initializeJob(JOB_ID, JOB_AMOUNT, arbiter.publicKey)
+      .initializeJob(JOB_ID, JOB_AMOUNT, "Test Title", "Test Description", null, 6)
       .accounts({
         client: client.publicKey,
         mint,
+        arbiter: arbiter.publicKey,
         clientTokenAccount,
         job: jobPDA,
         vault: vaultPDA,
@@ -86,7 +111,7 @@ describe("trustlayer", () => {
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       } as any)
-      .signers([client])
+      .signers([client, arbiter])
       .rpc();
 
     // Vault should hold the funds
@@ -101,16 +126,31 @@ describe("trustlayer", () => {
     expect(job.status).to.deep.equal({ open: {} });
   });
 
-  it("accept_job: freelancer accepts the open job", async () => {
+  it("apply_and_hire: freelancer applies and client hires", async () => {
     const jobPDA = getJobPDA(client.publicKey, JOB_ID);
+    const appPDA = getApplicationPDA(jobPDA, freelancer.publicKey);
 
+    // Freelancer applies
     await program.methods
-      .acceptJob()
+      .applyForJob("I want to work!")
       .accounts({
         freelancer: freelancer.publicKey,
         job: jobPDA,
+        application: appPDA,
+        systemProgram: anchor.web3.SystemProgram.programId,
       } as any)
       .signers([freelancer])
+      .rpc();
+
+    // Client hires
+    await program.methods
+      .hireFreelancer()
+      .accounts({
+        client: client.publicKey,
+        job: jobPDA,
+        application: appPDA,
+      } as any)
+      .signers([client])
       .rpc();
 
     const job = await program.account.jobEscrow.fetch(jobPDA);
@@ -122,7 +162,7 @@ describe("trustlayer", () => {
     const jobPDA = getJobPDA(client.publicKey, JOB_ID);
 
     await program.methods
-      .submitWork()
+      .submitWork("https://example.com/work")
       .accounts({
         freelancer: freelancer.publicKey,
         job: jobPDA,
@@ -137,6 +177,7 @@ describe("trustlayer", () => {
   it("approve_and_release: client approves and pays the freelancer", async () => {
     const jobPDA = getJobPDA(client.publicKey, JOB_ID);
     const vaultPDA = getVaultPDA(jobPDA);
+    const freelancerProfilePDA = getProfilePDA(freelancer.publicKey);
 
     await program.methods
       .approveAndRelease()
@@ -144,10 +185,15 @@ describe("trustlayer", () => {
         client: client.publicKey,
         freelancer: freelancer.publicKey,
         job: jobPDA,
+        clientTokenAccount,
         mint,
         freelancerTokenAccount,
         vault: vaultPDA,
+        freelancerProfile: freelancerProfilePDA,
+        systemProgram: anchor.web3.SystemProgram.programId,
         tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       } as any)
       .signers([client])
       .rpc();
@@ -168,10 +214,11 @@ describe("trustlayer", () => {
 
     // Create a fresh job
     await program.methods
-      .initializeJob(cancelJobId, JOB_AMOUNT, arbiter.publicKey)
+      .initializeJob(cancelJobId, JOB_AMOUNT, "Cancel Test", "Testing cancellation", null, 6)
       .accounts({
         client: client.publicKey,
         mint,
+        arbiter: arbiter.publicKey,
         clientTokenAccount,
         job: jobPDA,
         vault: vaultPDA,
@@ -180,7 +227,7 @@ describe("trustlayer", () => {
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       } as any)
-      .signers([client])
+      .signers([client, arbiter])
       .rpc();
 
     const balanceBefore = await connection.getTokenAccountBalance(clientTokenAccount);
@@ -191,9 +238,13 @@ describe("trustlayer", () => {
       .accounts({
         client: client.publicKey,
         job: jobPDA,
+        mint,
         clientTokenAccount,
         vault: vaultPDA,
+        systemProgram: anchor.web3.SystemProgram.programId,
         tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       } as any)
       .signers([client])
       .rpc();
@@ -216,20 +267,22 @@ describe("trustlayer", () => {
     const jobPDA = getJobPDA(client.publicKey, disputeJobId);
     const vaultPDA = getVaultPDA(jobPDA);
 
-    // Client token account for refund portion
     const clientTokenAccountInfo = await getOrCreateAssociatedTokenAccount(
       connection, client, mint, client.publicKey
     );
     const freelancerTokenAccountInfo = await getOrCreateAssociatedTokenAccount(
       connection, freelancer, mint, freelancer.publicKey
     );
+    const appPDA = getApplicationPDA(jobPDA, freelancer.publicKey);
+    const freelancerProfilePDA = getProfilePDA(freelancer.publicKey);
 
     // Initialize
     await program.methods
-      .initializeJob(disputeJobId, JOB_AMOUNT, arbiter.publicKey)
+      .initializeJob(disputeJobId, JOB_AMOUNT, "Dispute Job", "Testing dispute", null, 6)
       .accounts({
         client: client.publicKey,
         mint,
+        arbiter: arbiter.publicKey,
         clientTokenAccount,
         job: jobPDA,
         vault: vaultPDA,
@@ -238,14 +291,30 @@ describe("trustlayer", () => {
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       } as any)
-      .signers([client])
+      .signers([client, arbiter])
       .rpc();
 
-    // Accept
+    // Apply
     await program.methods
-      .acceptJob()
-      .accounts({ freelancer: freelancer.publicKey, job: jobPDA } as any)
+      .applyForJob("I can do this")
+      .accounts({
+        freelancer: freelancer.publicKey,
+        job: jobPDA,
+        application: appPDA,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      } as any)
       .signers([freelancer])
+      .rpc();
+
+    // Hire
+    await program.methods
+      .hireFreelancer()
+      .accounts({
+        client: client.publicKey,
+        job: jobPDA,
+        application: appPDA,
+      } as any)
+      .signers([client])
       .rpc();
 
     // Dispute (called by client)
@@ -258,27 +327,31 @@ describe("trustlayer", () => {
     const job = await program.account.jobEscrow.fetch(jobPDA);
     expect(job.status).to.deep.equal({ disputed: {} });
 
-    const clientBalBefore = parseInt((await connection.getTokenAccountBalance(clientTokenAccount)).value.amount);
-    const freelancerBalBefore = parseInt((await connection.getTokenAccountBalance(freelancerTokenAccount)).value.amount);
+    const clientBalBefore = parseInt((await connection.getTokenAccountBalance(clientTokenAccountInfo.address)).value.amount);
+    const freelancerBalBefore = parseInt((await connection.getTokenAccountBalance(freelancerTokenAccountInfo.address)).value.amount);
 
-    // Resolve: 600 to freelancer, 400 to client
+    // Resolve: args are (freelancer_award, client_award) — give 600 to freelancer, 400 to client
     await program.methods
-      .resolveDispute(new anchor.BN(400), new anchor.BN(600))
+      .resolveDispute(new anchor.BN(600), new anchor.BN(400))
       .accounts({
         arbiter: arbiter.publicKey,
         client: client.publicKey,
         freelancer: freelancer.publicKey,
         job: jobPDA,
-        clientTokenAccount,
-        freelancerTokenAccount,
+        mint,
+        clientTokenAccount: clientTokenAccountInfo.address,
+        freelancerTokenAccount: freelancerTokenAccountInfo.address,
         vault: vaultPDA,
+        systemProgram: anchor.web3.SystemProgram.programId,
         tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       } as any)
       .signers([arbiter])
       .rpc();
 
-    const clientBalAfter = parseInt((await connection.getTokenAccountBalance(clientTokenAccount)).value.amount);
-    const freelancerBalAfter = parseInt((await connection.getTokenAccountBalance(freelancerTokenAccount)).value.amount);
+    const clientBalAfter = parseInt((await connection.getTokenAccountBalance(clientTokenAccountInfo.address)).value.amount);
+    const freelancerBalAfter = parseInt((await connection.getTokenAccountBalance(freelancerTokenAccountInfo.address)).value.amount);
 
     expect(clientBalAfter - clientBalBefore).to.equal(400);
     expect(freelancerBalAfter - freelancerBalBefore).to.equal(600);

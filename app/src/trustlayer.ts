@@ -58,10 +58,10 @@ export type Trustlayer = {
       "args": []
     },
     {
-      "name": "dispute",
+      "name": "disputeJob",
       "discriminator": [101, 104, 253, 231, 1, 139, 108, 100],
       "accounts": [
-        { "name": "user", "writable": true, "signer": true },
+        { "name": "caller", "writable": true, "signer": true },
         { "name": "job", "writable": true }
       ],
       "args": []
@@ -82,6 +82,7 @@ export type Trustlayer = {
       "accounts": [
         { "name": "client", "writable": true, "signer": true },
         { "name": "mint" },
+        { "name": "arbiter", "writable": true, "signer": true },
         { "name": "clientTokenAccount", "writable": true },
         { "name": "job", "writable": true },
         { "name": "vault", "writable": true },
@@ -93,7 +94,6 @@ export type Trustlayer = {
       "args": [
         { "name": "jobId", "type": "u64" },
         { "name": "amount", "type": "u64" },
-        { "name": "arbiter", "type": "pubkey" },
         { "name": "title", "type": "string" },
         { "name": "description", "type": "string" },
         { "name": "milestoneAmounts", "type": { "option": { "vec": "u64" } } },
@@ -163,8 +163,8 @@ export type Trustlayer = {
         { "name": "rent", "address": "SysvarRent111111111111111111111111111111111" }
       ],
       "args": [
-        { "name": "clientAward", "type": "u64" },
-        { "name": "freelancerAward", "type": "u64" }
+        { "name": "freelancerAward", "type": "u64" },
+        { "name": "clientAward", "type": "u64" }
       ]
     },
     {
