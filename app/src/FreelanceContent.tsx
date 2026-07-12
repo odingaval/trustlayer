@@ -43,6 +43,9 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
   const [processing, setProcessing] = useState<string | null>(null);
   const [tokenBalance, setTokenBalance] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'client' | 'freelancer' | 'market' | 'arbitration'>('client');
+  const [jobLogs, setJobLogs] = useState<Record<string, any[]>>({});
+  const [loadingLogs, setLoadingLogs] = useState<Record<string, boolean>>({});
+  const [expandedTimelines, setExpandedTimelines] = useState<Record<string, boolean>>({});
   const [viewMode, setViewMode] = useState<'hire' | 'work'>('hire');
   const [milestones, setMilestones] = useState<{ amount: string }[]>([]);
   const [applications, setApplications] = useState<any[]>([]);
@@ -129,6 +132,50 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
       setFetching(false);
     }
   }, [program, fetching, lastFetch, toast.show]);
+
+  const fetchLogsForJob = useCallback(async (jobPubkeyStr: string) => {
+    if (!program) return;
+    setLoadingLogs(prev => ({ ...prev, [jobPubkeyStr]: true }));
+    try {
+      const coder = program.coder.accounts;
+      const rawLogs = await connection.getProgramAccounts(program.programId, {
+        filters: [
+          { memcmp: coder.memcmp("projectLog") },
+          { memcmp: { offset: 8, bytes: new PublicKey(jobPubkeyStr).toBase58() } }
+        ]
+      });
+
+      const parsed = rawLogs.map(raw => {
+        try {
+          return {
+            publicKey: raw.pubkey,
+            account: coder.decode("projectLog", raw.account.data)
+          };
+        } catch {
+          return null;
+        }
+      }).filter(x => x !== null) as any[];
+
+      // Sort chronologically by timestamp
+      parsed.sort((a, b) => a.account.timestamp.toNumber() - b.account.timestamp.toNumber());
+
+      setJobLogs(prev => ({ ...prev, [jobPubkeyStr]: parsed }));
+    } catch (err: any) {
+      console.error("Failed to fetch logs for job:", err);
+    } finally {
+      setLoadingLogs(prev => ({ ...prev, [jobPubkeyStr]: false }));
+    }
+  }, [program, connection]);
+
+  const toggleTimeline = useCallback((jobPubkeyStr: string) => {
+    setExpandedTimelines(prev => {
+      const nextVal = !prev[jobPubkeyStr];
+      if (nextVal) {
+        fetchLogsForJob(jobPubkeyStr);
+      }
+      return { ...prev, [jobPubkeyStr]: nextVal };
+    });
+  }, [fetchLogsForJob]);
 
   // Background polling to keep status in sync
   useEffect(() => {
@@ -491,6 +538,7 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
           .preInstructions([computeBudgetIx, priorityFeeIx])
           .rpc();
         toast.show('Update posted to chain!', 'success');
+        fetchLogsForJob(jobPDA.toString());
       } else if (action === 'approve') {
         const freelancerPK = jobAccount.freelancer;
         const [freelancerProfilePDA] = PublicKey.findProgramAddressSync(
@@ -1286,32 +1334,125 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
                               )}
 
                               {/* Project Log / Evidence Timeline */}
-                              {(isClient || isFreelancer) && status !== 'open' && (
+                              {(isClient || isFreelancer || activeTab === 'arbitration') && status !== 'open' && (
                                 <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-                                  <p style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700, marginBottom: 8 }}>Project Timeline</p>
-
-                                  <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                                    <input
-                                      type="text"
-                                      placeholder="Post an update or link..."
-                                      value={updateMsg[pid] || ''}
-                                      onChange={(e) => setUpdateMsg({ ...updateMsg, [pid]: e.target.value })}
-                                      style={{ flex: 1, fontSize: '0.75rem', padding: '6px 10px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: 6, color: 'white' }}
-                                    />
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                    <p style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700, margin: 0 }}>Project Timeline</p>
                                     <button
-                                      onClick={() => {
-                                        if (updateMsg[pid]) {
-                                          handleAction(job, 'post_update', updateMsg[pid]);
-                                          setUpdateMsg({ ...updateMsg, [pid]: '' });
-                                        }
+                                      type="button"
+                                      onClick={() => toggleTimeline(pid)}
+                                      style={{
+                                        background: 'transparent',
+                                        border: 'none',
+                                        color: '#A78BFA',
+                                        fontSize: '0.68rem',
+                                        cursor: 'pointer',
+                                        fontWeight: 700,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 4
                                       }}
-                                      disabled={!!processing || !updateMsg[pid]}
-                                      className="btn-primary"
-                                      style={{ padding: '0 12px', height: 32, fontSize: '0.7rem' }}
                                     >
-                                      Post
+                                      {expandedTimelines[pid] ? 'Hide Timeline ▲' : 'Show Timeline ▼'}
                                     </button>
                                   </div>
+
+                                  {expandedTimelines[pid] && (
+                                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} style={{ marginBottom: 12, overflow: 'hidden' }}>
+                                      {loadingLogs[pid] ? (
+                                        <div style={{ display: 'flex', justifyContent: 'center', padding: '16px 0' }}>
+                                          <Loader2 size={16} className="spin" color="var(--primary)" />
+                                        </div>
+                                      ) : (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '8px 4px 8px 12px', borderLeft: '2px dashed var(--border)', marginLeft: 6, marginBottom: 12 }}>
+                                          {(jobLogs[pid] || []).map((log) => {
+                                            const authorPK = log.account.author.toString();
+                                            let authorLabel = "Participant";
+                                            let authorColor = "#A78BFA";
+                                            let authorBg = "rgba(167, 139, 250, 0.1)";
+
+                                            if (authorPK === job.account.client.toString()) {
+                                              authorLabel = "Client";
+                                              authorColor = "#A78BFA";
+                                              authorBg = "rgba(167, 139, 250, 0.1)";
+                                            } else if (authorPK === job.account.freelancer.toString()) {
+                                              authorLabel = "Freelancer";
+                                              authorColor = "#10B981";
+                                              authorBg = "rgba(16, 185, 129, 0.1)";
+                                            } else if (authorPK === job.account.arbiter.toString()) {
+                                              authorLabel = "Arbiter";
+                                              authorColor = "#EF4444";
+                                              authorBg = "rgba(239, 68, 68, 0.1)";
+                                            }
+
+                                            return (
+                                              <div key={log.publicKey.toString()} style={{ position: 'relative' }}>
+                                                {/* Bullet point indicator */}
+                                                <div style={{
+                                                  position: 'absolute',
+                                                  left: -18,
+                                                  top: 5,
+                                                  width: 8,
+                                                  height: 8,
+                                                  borderRadius: '50%',
+                                                  background: authorColor,
+                                                  boxShadow: `0 0 8px ${authorColor}`
+                                                }} />
+                                                <div style={{ background: 'rgba(255,255,255,0.01)', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)' }}>
+                                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                                    <span style={{ fontSize: '0.62rem', fontWeight: 700, color: authorColor, background: authorBg, padding: '1px 5px', borderRadius: 4 }}>
+                                                      {authorLabel}
+                                                    </span>
+                                                    <span style={{ fontSize: '0.58rem', color: 'var(--text-muted)' }}>
+                                                      {new Date(log.account.timestamp.toNumber() * 1000).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}
+                                                    </span>
+                                                  </div>
+                                                  <p style={{ fontSize: '0.75rem', color: 'white', margin: 0, lineHeight: 1.35, wordBreak: 'break-word' }}>
+                                                    {log.account.content}
+                                                  </p>
+                                                  <div style={{ fontSize: '0.55rem', color: 'var(--text-muted)', marginTop: 4, fontFamily: 'monospace' }}>
+                                                    By: {authorPK.substring(0, 4)}...{authorPK.substring(authorPK.length - 4)}
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                          {!(jobLogs[pid]?.length) && (
+                                            <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontStyle: 'italic', margin: 0, paddingLeft: 4 }}>
+                                              No updates posted yet.
+                                            </p>
+                                          )}
+                                        </div>
+                                      )}
+                                    </motion.div>
+                                  )}
+
+                                  {/* Only Client and Freelancer can write timeline updates */}
+                                  {(isClient || isFreelancer) && (
+                                    <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                                      <input
+                                        type="text"
+                                        placeholder="Post an update or link..."
+                                        value={updateMsg[pid] || ''}
+                                        onChange={(e) => setUpdateMsg({ ...updateMsg, [pid]: e.target.value })}
+                                        style={{ flex: 1, fontSize: '0.75rem', padding: '6px 10px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: 6, color: 'white' }}
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          if (updateMsg[pid]) {
+                                            handleAction(job, 'post_update', updateMsg[pid]);
+                                            setUpdateMsg({ ...updateMsg, [pid]: '' });
+                                          }
+                                        }}
+                                        disabled={!!processing || !updateMsg[pid]}
+                                        className="btn-primary"
+                                        style={{ padding: '0 12px', height: 32, fontSize: '0.7rem' }}
+                                      >
+                                        Post
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>
