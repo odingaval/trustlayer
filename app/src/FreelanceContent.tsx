@@ -268,6 +268,33 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
     try { new PublicKey(addr); return true; } catch { return false; }
   };
 
+  const arbiterPool = useMemo(() => {
+    const poolStr = import.meta.env.VITE_ARBITER_POOL || '';
+    if (poolStr) {
+      return poolStr.split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+    }
+    return [
+      'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+      'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
+      'SysvarRent111111111111111111111111111111111'
+    ];
+  }, []);
+
+  const handleRandomizeArbiter = () => {
+    if (arbiterPool.length === 0) return;
+    let filteredPool = arbiterPool;
+    if (publicKey) {
+      filteredPool = arbiterPool.filter(addr => addr !== publicKey.toString());
+    }
+    if (filteredPool.length === 0) {
+      filteredPool = arbiterPool;
+    }
+    const randomIndex = Math.floor(Math.random() * filteredPool.length);
+    setArbiterAddr(filteredPool[randomIndex]);
+    toast.show('Random arbiter assigned from pool!', 'info');
+  };
+
+
   const handleCreateJob = async () => {
     if (!program || !publicKey) return;
     if (!mint || !amount) {
@@ -866,26 +893,48 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
                           : <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.1)', padding: '2px 8px', borderRadius: 6 }}>✗ Invalid</span>
                       )}
                     </div>
-                    <input
-                      type="text"
-                      placeholder="Paste arbiter's Solana wallet address..."
-                      value={arbiterAddr}
-                      onChange={e => setArbiterAddr(e.target.value.trim())}
-                      style={{
-                        fontFamily: 'monospace',
-                        fontSize: '0.75rem',
-                        borderColor: arbiterAddr && !isValidPubkey(arbiterAddr)
-                          ? 'rgba(239,68,68,0.5)'
-                          : arbiterAddr && isValidPubkey(arbiterAddr) && arbiterAddr !== publicKey?.toString()
-                            ? 'rgba(16,185,129,0.4)'
-                            : undefined,
-                      }}
-                    />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input
+                        type="text"
+                        placeholder="Paste arbiter's Solana wallet address..."
+                        value={arbiterAddr}
+                        onChange={e => setArbiterAddr(e.target.value.trim())}
+                        style={{
+                          flex: 1,
+                          fontFamily: 'monospace',
+                          fontSize: '0.75rem',
+                          borderColor: arbiterAddr && !isValidPubkey(arbiterAddr)
+                            ? 'rgba(239,68,68,0.5)'
+                            : arbiterAddr && isValidPubkey(arbiterAddr) && arbiterAddr !== publicKey?.toString()
+                              ? 'rgba(16,185,129,0.4)'
+                              : undefined,
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleRandomizeArbiter}
+                        className="btn-secondary"
+                        style={{
+                          padding: '0 14px',
+                          fontSize: '0.78rem',
+                          fontWeight: 700,
+                          borderRadius: 10,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          whiteSpace: 'nowrap',
+                          height: '42px',
+                          alignSelf: 'center'
+                        }}
+                      >
+                        🎲 Auto-assign
+                      </button>
+                    </div>
                     <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.5 }}>
                       The arbiter is a neutral third party who can resolve disputes and split funds if there's a disagreement.{' '}
                       {import.meta.env.VITE_DEFAULT_ARBITER
-                        ? 'A platform default has been pre-filled — you may override it.'
-                        : 'Ask your counterparty to agree on a trusted address before starting.'}
+                        ? 'A platform default has been pre-filled — you may override it or randomize.'
+                        : 'You can input an address manually or click Auto-assign to select one from the trusted platform pool.'}
                     </p>
                   </div>
 
