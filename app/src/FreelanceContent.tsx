@@ -32,6 +32,10 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
   const [mint, setMint] = useState('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  // Arbiter address — pre-filled from the platform default env var if set
+  const [arbiterAddr, setArbiterAddr] = useState(
+    () => import.meta.env.VITE_DEFAULT_ARBITER || ''
+  );
   const [loading, setLoading] = useState(false);
   const [minting, setMinting] = useState(false);
   const [jobs, setJobs] = useState<any[]>([]);
@@ -259,16 +263,27 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
     } finally { setMinting(false); }
   };
 
+  /** Returns true if a string is a valid base-58 Solana public key. */
+  const isValidPubkey = (addr: string): boolean => {
+    try { new PublicKey(addr); return true; } catch { return false; }
+  };
+
   const handleCreateJob = async () => {
     if (!program || !publicKey) return;
     if (!mint || !amount) {
       toast.show('Please fill in all fields.', 'error'); return;
     }
+    if (!arbiterAddr || !isValidPubkey(arbiterAddr)) {
+      toast.show('Please enter a valid arbiter address.', 'error'); return;
+    }
+    if (arbiterAddr === publicKey.toString()) {
+      toast.show('The arbiter cannot be the same as the client.', 'error'); return;
+    }
     setLoading(true);
     try {
       const mintPK = new PublicKey(mint);
-      const arbiterPK = new PublicKey('11111111111111111111111111111111'); // Hardcoded arbiter for demo
-      const jobId = new anchor.BN(Date.now()); // Generate unique ID
+      const arbiterPK = new PublicKey(arbiterAddr);
+      const jobId = new anchor.BN(Date.now());
 
       const [jobPDA] = PublicKey.findProgramAddressSync(
         [Buffer.from('job_v3'), publicKey.toBuffer(), jobId.toArrayLike(Buffer, 'le', 8)],
@@ -308,7 +323,7 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
         .accounts({
           client: publicKey,
           mint: mintPK,
-          arbiter: new PublicKey('11111111111111111111111111111111'), // Demo arbiter account, must sign in production
+          arbiter: arbiterPK,
           clientTokenAccount: clientTA,
           job: jobPDA,
           vault: vaultPDA,
@@ -318,6 +333,8 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
 
       toast.show('Job created successfully!', 'success');
       setAmount(''); setMint(''); setTitle(''); setDescription(''); setMilestones([]);
+      // Reset arbiter to platform default (if set) after job creation
+      setArbiterAddr(import.meta.env.VITE_DEFAULT_ARBITER || '');
       fetchJobs(true);
       fetchBalance();
     } catch (err: any) {
@@ -830,6 +847,48 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
                       style={{ width: '100%', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: 10, padding: 12, color: 'white', fontSize: '0.85rem', minHeight: 80, outline: 'none' }}
                     />
                   </div>
+
+                  {/* ── Arbiter Address ── */}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <label className="label" style={{ marginBottom: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Shield size={12} color="#A78BFA" />
+                        Arbiter Address
+                      </label>
+                      {/* Inline validation badge */}
+                      {arbiterAddr && (
+                        isValidPubkey(arbiterAddr)
+                          ? arbiterAddr === publicKey?.toString()
+                            ? <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.1)', padding: '2px 8px', borderRadius: 6 }}>⚠ Cannot be yourself</span>
+                            : import.meta.env.VITE_DEFAULT_ARBITER && arbiterAddr === import.meta.env.VITE_DEFAULT_ARBITER
+                              ? <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#10B981', background: 'rgba(16,185,129,0.1)', padding: '2px 8px', borderRadius: 6 }}>✓ Platform Default</span>
+                              : <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#10B981', background: 'rgba(16,185,129,0.1)', padding: '2px 8px', borderRadius: 6 }}>✓ Valid Address</span>
+                          : <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.1)', padding: '2px 8px', borderRadius: 6 }}>✗ Invalid</span>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Paste arbiter's Solana wallet address..."
+                      value={arbiterAddr}
+                      onChange={e => setArbiterAddr(e.target.value.trim())}
+                      style={{
+                        fontFamily: 'monospace',
+                        fontSize: '0.75rem',
+                        borderColor: arbiterAddr && !isValidPubkey(arbiterAddr)
+                          ? 'rgba(239,68,68,0.5)'
+                          : arbiterAddr && isValidPubkey(arbiterAddr) && arbiterAddr !== publicKey?.toString()
+                            ? 'rgba(16,185,129,0.4)'
+                            : undefined,
+                      }}
+                    />
+                    <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.5 }}>
+                      The arbiter is a neutral third party who can resolve disputes and split funds if there's a disagreement.{' '}
+                      {import.meta.env.VITE_DEFAULT_ARBITER
+                        ? 'A platform default has been pre-filled — you may override it.'
+                        : 'Ask your counterparty to agree on a trusted address before starting.'}
+                    </p>
+                  </div>
+
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                       <label className="label" style={{ marginBottom: 0 }}>Payment Token</label>
