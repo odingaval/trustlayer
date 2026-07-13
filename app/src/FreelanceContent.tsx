@@ -16,7 +16,7 @@ import {
 } from '@solana/spl-token';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Lock, RefreshCw, Layers, Briefcase, PlusCircle, Check, Coins, Wand2, Shield, User, ArrowLeft
+  Lock, RefreshCw, Layers, Briefcase, PlusCircle, Check, Coins, Wand2, Shield, User, ArrowLeft, Loader2
 } from 'lucide-react';
 
 import { RoleSelector } from './RoleSelector';
@@ -331,7 +331,7 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
     if (arbiterPool.length === 0) return;
     let filteredPool = arbiterPool;
     if (publicKey) {
-      filteredPool = arbiterPool.filter(addr => addr !== publicKey.toString());
+      filteredPool = arbiterPool.filter((addr: string) => addr !== publicKey.toString());
     }
     if (filteredPool.length === 0) {
       filteredPool = arbiterPool;
