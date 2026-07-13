@@ -473,7 +473,9 @@ pub struct InitializeJob<'info> {
     #[account(mut)]
     pub client: Signer<'info>,
     pub mint: Account<'info, Mint>,
-    pub arbiter: Signer<'info>,
+    /// CHECK: Arbiter pubkey is stored for future dispute resolution.
+    /// They are not required to sign at job creation — only when settling a dispute.
+    pub arbiter: UncheckedAccount<'info>,
 
     #[account(
         init_if_needed,
