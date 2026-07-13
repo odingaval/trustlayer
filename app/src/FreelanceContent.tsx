@@ -16,7 +16,7 @@ import {
 } from '@solana/spl-token';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Lock, RefreshCw, Layers, Briefcase, PlusCircle, Check, Coins, Wand2, Shield, User, ArrowLeft
+  Lock, RefreshCw, Layers, Briefcase, PlusCircle, Check, Coins, Wand2, Shield, User, ArrowLeft, Loader2
 } from 'lucide-react';
 
 import { RoleSelector } from './RoleSelector';
@@ -32,6 +32,10 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
   const [mint, setMint] = useState('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  // Arbiter address — pre-filled from the platform default env var if set
+  const [arbiterAddr, setArbiterAddr] = useState(
+    () => import.meta.env.VITE_DEFAULT_ARBITER || ''
+  );
   const [loading, setLoading] = useState(false);
   const [minting, setMinting] = useState(false);
   const [jobs, setJobs] = useState<any[]>([]);
@@ -39,6 +43,9 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
   const [processing, setProcessing] = useState<string | null>(null);
   const [tokenBalance, setTokenBalance] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'client' | 'freelancer' | 'market' | 'arbitration'>('client');
+  const [jobLogs, setJobLogs] = useState<Record<string, any[]>>({});
+  const [loadingLogs, setLoadingLogs] = useState<Record<string, boolean>>({});
+  const [expandedTimelines, setExpandedTimelines] = useState<Record<string, boolean>>({});
   const [viewMode, setViewMode] = useState<'hire' | 'work'>('hire');
   const [milestones, setMilestones] = useState<{ amount: string }[]>([]);
   const [applications, setApplications] = useState<any[]>([]);
@@ -125,6 +132,50 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
       setFetching(false);
     }
   }, [program, fetching, lastFetch, toast.show]);
+
+  const fetchLogsForJob = useCallback(async (jobPubkeyStr: string) => {
+    if (!program) return;
+    setLoadingLogs(prev => ({ ...prev, [jobPubkeyStr]: true }));
+    try {
+      const coder = program.coder.accounts;
+      const rawLogs = await connection.getProgramAccounts(program.programId, {
+        filters: [
+          { memcmp: coder.memcmp("projectLog") },
+          { memcmp: { offset: 8, bytes: new PublicKey(jobPubkeyStr).toBase58() } }
+        ]
+      });
+
+      const parsed = rawLogs.map(raw => {
+        try {
+          return {
+            publicKey: raw.pubkey,
+            account: coder.decode("projectLog", raw.account.data)
+          };
+        } catch {
+          return null;
+        }
+      }).filter(x => x !== null) as any[];
+
+      // Sort chronologically by timestamp
+      parsed.sort((a, b) => a.account.timestamp.toNumber() - b.account.timestamp.toNumber());
+
+      setJobLogs(prev => ({ ...prev, [jobPubkeyStr]: parsed }));
+    } catch (err: any) {
+      console.error("Failed to fetch logs for job:", err);
+    } finally {
+      setLoadingLogs(prev => ({ ...prev, [jobPubkeyStr]: false }));
+    }
+  }, [program, connection]);
+
+  const toggleTimeline = useCallback((jobPubkeyStr: string) => {
+    setExpandedTimelines(prev => {
+      const nextVal = !prev[jobPubkeyStr];
+      if (nextVal) {
+        fetchLogsForJob(jobPubkeyStr);
+      }
+      return { ...prev, [jobPubkeyStr]: nextVal };
+    });
+  }, [fetchLogsForJob]);
 
   // Background polling to keep status in sync
   useEffect(() => {
@@ -259,16 +310,54 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
     } finally { setMinting(false); }
   };
 
+  /** Returns true if a string is a valid base-58 Solana public key. */
+  const isValidPubkey = (addr: string): boolean => {
+    try { new PublicKey(addr); return true; } catch { return false; }
+  };
+
+  const arbiterPool = useMemo(() => {
+    const poolStr = import.meta.env.VITE_ARBITER_POOL || '';
+    if (poolStr) {
+      return poolStr.split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+    }
+    return [
+      'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+      'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
+      'SysvarRent111111111111111111111111111111111'
+    ];
+  }, []);
+
+  const handleRandomizeArbiter = () => {
+    if (arbiterPool.length === 0) return;
+    let filteredPool = arbiterPool;
+    if (publicKey) {
+      filteredPool = arbiterPool.filter((addr: string) => addr !== publicKey.toString());
+    }
+    if (filteredPool.length === 0) {
+      filteredPool = arbiterPool;
+    }
+    const randomIndex = Math.floor(Math.random() * filteredPool.length);
+    setArbiterAddr(filteredPool[randomIndex]);
+    toast.show('Random arbiter assigned from pool!', 'info');
+  };
+
+
   const handleCreateJob = async () => {
     if (!program || !publicKey) return;
     if (!mint || !amount) {
       toast.show('Please fill in all fields.', 'error'); return;
     }
+    if (!arbiterAddr || !isValidPubkey(arbiterAddr)) {
+      toast.show('Please enter a valid arbiter address.', 'error'); return;
+    }
+    if (arbiterAddr === publicKey.toString()) {
+      toast.show('The arbiter cannot be the same as the client.', 'error'); return;
+    }
     setLoading(true);
     try {
       const mintPK = new PublicKey(mint);
-      const arbiterPK = new PublicKey('11111111111111111111111111111111'); // Hardcoded arbiter for demo
-      const jobId = new anchor.BN(Date.now()); // Generate unique ID
+      const arbiterPK = new PublicKey(arbiterAddr);
+      const jobId = new anchor.BN(Date.now());
 
       const [jobPDA] = PublicKey.findProgramAddressSync(
         [Buffer.from('job_v3'), publicKey.toBuffer(), jobId.toArrayLike(Buffer, 'le', 8)],
@@ -308,7 +397,7 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
         .accounts({
           client: publicKey,
           mint: mintPK,
-          arbiter: new PublicKey('11111111111111111111111111111111'), // Demo arbiter account, must sign in production
+          arbiter: arbiterPK,
           clientTokenAccount: clientTA,
           job: jobPDA,
           vault: vaultPDA,
@@ -318,6 +407,8 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
 
       toast.show('Job created successfully!', 'success');
       setAmount(''); setMint(''); setTitle(''); setDescription(''); setMilestones([]);
+      // Reset arbiter to platform default (if set) after job creation
+      setArbiterAddr(import.meta.env.VITE_DEFAULT_ARBITER || '');
       fetchJobs(true);
       fetchBalance();
     } catch (err: any) {
@@ -447,6 +538,7 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
           .preInstructions([computeBudgetIx, priorityFeeIx])
           .rpc();
         toast.show('Update posted to chain!', 'success');
+        fetchLogsForJob(jobPDA.toString());
       } else if (action === 'approve') {
         const freelancerPK = jobAccount.freelancer;
         const [freelancerProfilePDA] = PublicKey.findProgramAddressSync(
@@ -830,6 +922,70 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
                       style={{ width: '100%', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: 10, padding: 12, color: 'white', fontSize: '0.85rem', minHeight: 80, outline: 'none' }}
                     />
                   </div>
+
+                  {/* ── Arbiter Address ── */}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <label className="label" style={{ marginBottom: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Shield size={12} color="#A78BFA" />
+                        Arbiter Address
+                      </label>
+                      {/* Inline validation badge */}
+                      {arbiterAddr && (
+                        isValidPubkey(arbiterAddr)
+                          ? arbiterAddr === publicKey?.toString()
+                            ? <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.1)', padding: '2px 8px', borderRadius: 6 }}>⚠ Cannot be yourself</span>
+                            : import.meta.env.VITE_DEFAULT_ARBITER && arbiterAddr === import.meta.env.VITE_DEFAULT_ARBITER
+                              ? <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#10B981', background: 'rgba(16,185,129,0.1)', padding: '2px 8px', borderRadius: 6 }}>✓ Platform Default</span>
+                              : <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#10B981', background: 'rgba(16,185,129,0.1)', padding: '2px 8px', borderRadius: 6 }}>✓ Valid Address</span>
+                          : <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.1)', padding: '2px 8px', borderRadius: 6 }}>✗ Invalid</span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input
+                        type="text"
+                        placeholder="Paste arbiter's Solana wallet address..."
+                        value={arbiterAddr}
+                        onChange={e => setArbiterAddr(e.target.value.trim())}
+                        style={{
+                          flex: 1,
+                          fontFamily: 'monospace',
+                          fontSize: '0.75rem',
+                          borderColor: arbiterAddr && !isValidPubkey(arbiterAddr)
+                            ? 'rgba(239,68,68,0.5)'
+                            : arbiterAddr && isValidPubkey(arbiterAddr) && arbiterAddr !== publicKey?.toString()
+                              ? 'rgba(16,185,129,0.4)'
+                              : undefined,
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleRandomizeArbiter}
+                        className="btn-secondary"
+                        style={{
+                          padding: '0 14px',
+                          fontSize: '0.78rem',
+                          fontWeight: 700,
+                          borderRadius: 10,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          whiteSpace: 'nowrap',
+                          height: '42px',
+                          alignSelf: 'center'
+                        }}
+                      >
+                        🎲 Auto-assign
+                      </button>
+                    </div>
+                    <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.5 }}>
+                      The arbiter is a neutral third party who can resolve disputes and split funds if there's a disagreement.{' '}
+                      {import.meta.env.VITE_DEFAULT_ARBITER
+                        ? 'A platform default has been pre-filled — you may override it or randomize.'
+                        : 'You can input an address manually or click Auto-assign to select one from the trusted platform pool.'}
+                    </p>
+                  </div>
+
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                       <label className="label" style={{ marginBottom: 0 }}>Payment Token</label>
@@ -1178,32 +1334,125 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
                               )}
 
                               {/* Project Log / Evidence Timeline */}
-                              {(isClient || isFreelancer) && status !== 'open' && (
+                              {(isClient || isFreelancer || activeTab === 'arbitration') && status !== 'open' && (
                                 <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-                                  <p style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700, marginBottom: 8 }}>Project Timeline</p>
-
-                                  <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                                    <input
-                                      type="text"
-                                      placeholder="Post an update or link..."
-                                      value={updateMsg[pid] || ''}
-                                      onChange={(e) => setUpdateMsg({ ...updateMsg, [pid]: e.target.value })}
-                                      style={{ flex: 1, fontSize: '0.75rem', padding: '6px 10px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: 6, color: 'white' }}
-                                    />
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                    <p style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700, margin: 0 }}>Project Timeline</p>
                                     <button
-                                      onClick={() => {
-                                        if (updateMsg[pid]) {
-                                          handleAction(job, 'post_update', updateMsg[pid]);
-                                          setUpdateMsg({ ...updateMsg, [pid]: '' });
-                                        }
+                                      type="button"
+                                      onClick={() => toggleTimeline(pid)}
+                                      style={{
+                                        background: 'transparent',
+                                        border: 'none',
+                                        color: '#A78BFA',
+                                        fontSize: '0.68rem',
+                                        cursor: 'pointer',
+                                        fontWeight: 700,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 4
                                       }}
-                                      disabled={!!processing || !updateMsg[pid]}
-                                      className="btn-primary"
-                                      style={{ padding: '0 12px', height: 32, fontSize: '0.7rem' }}
                                     >
-                                      Post
+                                      {expandedTimelines[pid] ? 'Hide Timeline ▲' : 'Show Timeline ▼'}
                                     </button>
                                   </div>
+
+                                  {expandedTimelines[pid] && (
+                                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} style={{ marginBottom: 12, overflow: 'hidden' }}>
+                                      {loadingLogs[pid] ? (
+                                        <div style={{ display: 'flex', justifyContent: 'center', padding: '16px 0' }}>
+                                          <Loader2 size={16} className="spin" color="var(--primary)" />
+                                        </div>
+                                      ) : (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '8px 4px 8px 12px', borderLeft: '2px dashed var(--border)', marginLeft: 6, marginBottom: 12 }}>
+                                          {(jobLogs[pid] || []).map((log) => {
+                                            const authorPK = log.account.author.toString();
+                                            let authorLabel = "Participant";
+                                            let authorColor = "#A78BFA";
+                                            let authorBg = "rgba(167, 139, 250, 0.1)";
+
+                                            if (authorPK === job.account.client.toString()) {
+                                              authorLabel = "Client";
+                                              authorColor = "#A78BFA";
+                                              authorBg = "rgba(167, 139, 250, 0.1)";
+                                            } else if (authorPK === job.account.freelancer.toString()) {
+                                              authorLabel = "Freelancer";
+                                              authorColor = "#10B981";
+                                              authorBg = "rgba(16, 185, 129, 0.1)";
+                                            } else if (authorPK === job.account.arbiter.toString()) {
+                                              authorLabel = "Arbiter";
+                                              authorColor = "#EF4444";
+                                              authorBg = "rgba(239, 68, 68, 0.1)";
+                                            }
+
+                                            return (
+                                              <div key={log.publicKey.toString()} style={{ position: 'relative' }}>
+                                                {/* Bullet point indicator */}
+                                                <div style={{
+                                                  position: 'absolute',
+                                                  left: -18,
+                                                  top: 5,
+                                                  width: 8,
+                                                  height: 8,
+                                                  borderRadius: '50%',
+                                                  background: authorColor,
+                                                  boxShadow: `0 0 8px ${authorColor}`
+                                                }} />
+                                                <div style={{ background: 'rgba(255,255,255,0.01)', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)' }}>
+                                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                                    <span style={{ fontSize: '0.62rem', fontWeight: 700, color: authorColor, background: authorBg, padding: '1px 5px', borderRadius: 4 }}>
+                                                      {authorLabel}
+                                                    </span>
+                                                    <span style={{ fontSize: '0.58rem', color: 'var(--text-muted)' }}>
+                                                      {new Date(log.account.timestamp.toNumber() * 1000).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}
+                                                    </span>
+                                                  </div>
+                                                  <p style={{ fontSize: '0.75rem', color: 'white', margin: 0, lineHeight: 1.35, wordBreak: 'break-word' }}>
+                                                    {log.account.content}
+                                                  </p>
+                                                  <div style={{ fontSize: '0.55rem', color: 'var(--text-muted)', marginTop: 4, fontFamily: 'monospace' }}>
+                                                    By: {authorPK.substring(0, 4)}...{authorPK.substring(authorPK.length - 4)}
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                          {!(jobLogs[pid]?.length) && (
+                                            <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontStyle: 'italic', margin: 0, paddingLeft: 4 }}>
+                                              No updates posted yet.
+                                            </p>
+                                          )}
+                                        </div>
+                                      )}
+                                    </motion.div>
+                                  )}
+
+                                  {/* Only Client and Freelancer can write timeline updates */}
+                                  {(isClient || isFreelancer) && (
+                                    <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                                      <input
+                                        type="text"
+                                        placeholder="Post an update or link..."
+                                        value={updateMsg[pid] || ''}
+                                        onChange={(e) => setUpdateMsg({ ...updateMsg, [pid]: e.target.value })}
+                                        style={{ flex: 1, fontSize: '0.75rem', padding: '6px 10px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: 6, color: 'white' }}
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          if (updateMsg[pid]) {
+                                            handleAction(job, 'post_update', updateMsg[pid]);
+                                            setUpdateMsg({ ...updateMsg, [pid]: '' });
+                                          }
+                                        }}
+                                        disabled={!!processing || !updateMsg[pid]}
+                                        className="btn-primary"
+                                        style={{ padding: '0 12px', height: 32, fontSize: '0.7rem' }}
+                                      >
+                                        Post
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>

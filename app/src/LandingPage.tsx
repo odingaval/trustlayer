@@ -1,7 +1,47 @@
-import { motion } from 'framer-motion';
-import { Shield, ArrowRight, Lock, Layers, Zap, Code, Globe, Cpu, ChevronRight, CheckCircle } from 'lucide-react';
+import { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Shield, ArrowRight, Lock, Layers, Zap, Code, Globe, Cpu, CheckCircle, Mail, Sparkles } from 'lucide-react';
 
 export default function LandingPage({ onLaunch }: { onLaunch: () => void }) {
+  const [email, setEmail] = useState('');
+  const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const [error, setError] = useState('');
+
+  const handleWaitlistSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) return;
+    setLoading(true);
+    setError('');
+
+    try {
+      const res = await fetch('/api/loops/contacts/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          source: 'waitlist',
+          userGroup: 'waitlist',
+          // Add the list ID if you set VITE_LOOPS_LIST_ID in .env
+          ...(import.meta.env.VITE_LOOPS_LIST_ID
+            ? { mailingLists: { [import.meta.env.VITE_LOOPS_LIST_ID]: true } }
+            : {}),
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || 'Something went wrong. Please try again.');
+      }
+
+      setSubmitted(true);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
   return (
     <div style={{ minHeight: '100vh', position: 'relative', overflowX: 'hidden' }}>
       <div className="mesh-bg" />
@@ -177,14 +217,118 @@ export default function LandingPage({ onLaunch }: { onLaunch: () => void }) {
         </div>
       </section>
 
-      {/* CTA Section */}
-      <section style={{ padding: '80px 0', textAlign: 'center', background: 'radial-gradient(circle at center, rgba(123, 63, 228, 0.1) 0%, transparent 60%)' }}>
-        <div style={{ maxWidth: 800, margin: '0 auto', padding: '0 24px' }}>
-          <h2 style={{ fontSize: '2.5rem', fontWeight: 800, marginBottom: 24, color: 'white' }}>Ready to Start Hiring?</h2>
-          <p style={{ fontSize: '1.1rem', color: 'var(--text-muted)', marginBottom: 32 }}>Join the decentralized gig economy today and experience true trustless escrows.</p>
-          <button onClick={onLaunch} className="btn-primary" style={{ padding: '16px 36px', fontSize: '1.05rem', borderRadius: 12, margin: '0 auto' }}>
-            Launch App <ArrowRight size={18} style={{ marginLeft: 8 }} />
-          </button>
+      {/* Waitlist Section */}
+      <section id="waitlist" style={{ padding: '100px 0', textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
+        {/* Background glow */}
+        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 600, height: 400, background: 'radial-gradient(ellipse at center, rgba(123, 63, 228, 0.18) 0%, transparent 70%)', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', top: '30%', left: '20%', width: 200, height: 200, background: 'radial-gradient(circle, rgba(16, 185, 129, 0.08) 0%, transparent 70%)', pointerEvents: 'none' }} />
+
+        <div style={{ maxWidth: 680, margin: '0 auto', padding: '0 24px', position: 'relative', zIndex: 1 }}>
+          <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.6 }}>
+            {/* Badge */}
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 24, padding: '6px 16px', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: 100 }}>
+              <Sparkles size={12} color="#10B981" />
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#10B981', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Early Access</span>
+            </div>
+
+            <h2 style={{ fontSize: 'clamp(2rem, 5vw, 3rem)', fontWeight: 800, lineHeight: 1.15, letterSpacing: '-0.02em', marginBottom: 16, color: 'white' }}>
+              Be the First to Experience <span className="gradient-text">TrustLayer</span>
+            </h2>
+            <p style={{ fontSize: '1.05rem', color: 'var(--text-muted)', marginBottom: 40, lineHeight: 1.6 }}>
+              We're onboarding early freelancers and clients. Drop your email and we'll notify you the moment we're live on mainnet.
+            </p>
+
+            <AnimatePresence mode="wait">
+              {!submitted ? (
+                <motion.form
+                  key="form"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  onSubmit={handleWaitlistSubmit}
+                  style={{ display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center' }}
+                >
+                  <div style={{
+                    display: 'flex',
+                    width: '100%',
+                    maxWidth: 520,
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 14,
+                    overflow: 'hidden',
+                    transition: 'border-color 0.2s',
+                  }}
+                    onFocus={() => {}}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', padding: '0 16px', color: 'var(--text-muted)' }}>
+                      <Mail size={18} />
+                    </div>
+                    <input
+                      id="waitlist-email"
+                      type="email"
+                      required
+                      placeholder="you@example.com"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      style={{
+                        flex: 1,
+                        background: 'transparent',
+                        border: 'none',
+                        outline: 'none',
+                        padding: '16px 0',
+                        fontSize: '1rem',
+                        color: 'white',
+                        fontFamily: 'inherit',
+                      }}
+                    />
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="btn-primary"
+                      style={{
+                        margin: 6,
+                        padding: '10px 24px',
+                        fontSize: '0.9rem',
+                        borderRadius: 10,
+                        whiteSpace: 'nowrap',
+                        opacity: loading ? 0.7 : 1,
+                        cursor: loading ? 'not-allowed' : 'pointer',
+                        transition: 'opacity 0.2s',
+                      }}
+                    >
+                      {loading ? 'Joining...' : 'Join Waitlist'}
+                    </button>
+                  </div>
+                  <p style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.25)', margin: 0 }}>
+                    No spam, ever. Unsubscribe anytime.
+                  </p>
+                  {error && (
+                    <p style={{ fontSize: '0.85rem', color: '#f87171', margin: 0, padding: '10px 16px', background: 'rgba(248, 113, 113, 0.08)', borderRadius: 8, border: '1px solid rgba(248, 113, 113, 0.2)' }}>
+                      ⚠️ {error}
+                    </p>
+                  )}
+                </motion.form>
+              ) : (
+                <motion.div
+                  key="success"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.4 }}
+                  className="glass"
+                  style={{ padding: '32px 40px', borderRadius: 16, display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}
+                >
+                  <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <CheckCircle size={26} color="#10B981" />
+                  </div>
+                  <h3 style={{ fontSize: '1.3rem', fontWeight: 700, color: 'white', margin: 0 }}>You're on the list! 🎉</h3>
+                  <p style={{ fontSize: '0.95rem', color: 'var(--text-muted)', margin: 0 }}>We'll reach out to <strong style={{ color: 'white' }}>{email}</strong> as soon as early access opens.</p>
+                  <button onClick={onLaunch} className="btn-primary" style={{ padding: '10px 24px', fontSize: '0.85rem', borderRadius: 10, marginTop: 8 }}>
+                    Try the Devnet App <ArrowRight size={14} style={{ marginLeft: 6 }} />
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
         </div>
       </section>
 
