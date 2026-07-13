@@ -224,13 +224,45 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
 
   const handleSaveProfile = async (username: string, bio: string) => {
     if (!publicKey) return;
+    setLoading(true);
     try {
-      localStorage.setItem(`profile_override_${publicKey.toString()}`, JSON.stringify({ username, bio }));
-      setProfileOverride({ username, bio });
-      toast.show('Profile updated successfully!', 'success');
+      if (program && userProfile) {
+        // ── On-chain path: profile PDA already exists, call update_profile ──
+        const [profilePDA] = PublicKey.findProgramAddressSync(
+          [Buffer.from('user_profile'), publicKey.toBuffer()],
+          program.programId
+        );
+        await program.methods.updateProfile(username, bio)
+          .accounts({
+            user: publicKey,
+            profile: profilePDA,
+          } as any)
+          .rpc();
+        // Also cache locally so the UI reflects the change instantly
+        localStorage.setItem(
+          `profile_override_${publicKey.toString()}`,
+          JSON.stringify({ username, bio })
+        );
+        setProfileOverride({ username, bio });
+        toast.show('Profile saved on-chain! ✅', 'success');
+        // Re-fetch from chain so stats (jobsCompleted, totalEarned) stay fresh
+        fetchProfile();
+      } else {
+        // ── Fallback: no on-chain profile yet, save to localStorage only ──
+        // This handles first-time users who haven't called initialize_profile yet
+        localStorage.setItem(
+          `profile_override_${publicKey.toString()}`,
+          JSON.stringify({ username, bio })
+        );
+        setProfileOverride({ username, bio });
+        toast.show('Profile saved locally. Create a job to mint your on-chain profile!', 'info');
+      }
       setIsEditingProfile(false);
     } catch (err: any) {
-      toast.show('Failed to save profile: ' + err.message, 'error');
+      console.error('Failed to save profile:', err);
+      toast.show('Failed to save profile: ' + (err?.message || err), 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
