@@ -347,8 +347,9 @@ export default function LandingPage({ onLaunch }: { onLaunch: () => void }) {
             Decentralizing the gig economy. Built with ♥ on Solana.
           </p>
           <div style={{ display: 'flex', gap: 24 }}>
-            <a href="#" style={{ color: 'var(--text-muted)', textDecoration: 'none', transition: 'color 0.2s' }} onMouseEnter={e => e.currentTarget.style.color='white'} onMouseLeave={e => e.currentTarget.style.color='var(--text-muted)'}>Twitter</a>
-            <a href="#" style={{ color: 'var(--text-muted)', textDecoration: 'none', transition: 'color 0.2s' }} onMouseEnter={e => e.currentTarget.style.color='white'} onMouseLeave={e => e.currentTarget.style.color='var(--text-muted)'}>Discord</a>
+            <a href="https://x.com/Trustayer0" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-muted)', textDecoration: 'none', transition: 'color 0.2s' }} onMouseEnter={e => e.currentTarget.style.color='white'} onMouseLeave={e => e.currentTarget.style.color='var(--text-muted)'}>Twitter</a>
+            <a href="https://www.linkedin.com/company/trustlayer0/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-muted)', textDecoration: 'none', transition: 'color 0.2s' }} onMouseEnter={e => e.currentTarget.style.color='white'} onMouseLeave={e => e.currentTarget.style.color='var(--text-muted)'}>LinkedIn</a>
+            <a href="mailto:trustlayer01@gmail.com" style={{ color: 'var(--text-muted)', textDecoration: 'none', transition: 'color 0.2s' }} onMouseEnter={e => e.currentTarget.style.color='white'} onMouseLeave={e => e.currentTarget.style.color='var(--text-muted)'}>Contact</a>
           </div>
           <div style={{ width: '100%', height: 1, background: 'rgba(255,255,255,0.05)', margin: '40px 0 24px' }} />
           <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: '0.8rem' }}>&copy; {new Date().getFullYear()} TrustLayer. All rights reserved.</p>
