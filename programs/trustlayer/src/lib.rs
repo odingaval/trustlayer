@@ -113,6 +113,39 @@ pub mod trustlayer {
         Ok(())
     }
 
+    pub fn withdraw_application(_ctx: Context<WithdrawApplication>) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn register_arbiter(
+        ctx: Context<RegisterArbiter>,
+        name: String,
+        bio: String,
+        fee_percentage: u8,
+    ) -> Result<()> {
+        let profile = &mut ctx.accounts.profile;
+        profile.arbiter = ctx.accounts.arbiter.key();
+        profile.name = name;
+        profile.bio = bio;
+        profile.fee_percentage = fee_percentage;
+        profile.disputes_resolved = 0;
+        profile.bump = ctx.bumps.profile;
+        Ok(())
+    }
+
+    pub fn update_arbiter_profile(
+        ctx: Context<UpdateArbiterProfile>,
+        name: String,
+        bio: String,
+        fee_percentage: u8,
+    ) -> Result<()> {
+        let profile = &mut ctx.accounts.profile;
+        profile.name = name;
+        profile.bio = bio;
+        profile.fee_percentage = fee_percentage;
+        Ok(())
+    }
+
     pub fn submit_work(ctx: Context<SubmitWork>, submission_link: String) -> Result<()> {
         let job = &mut ctx.accounts.job;
         require!(job.status == JobStatus::InProgress, ErrorCode::InvalidStatus);
@@ -134,53 +167,6 @@ pub mod trustlayer {
         let amount = job.milestone_amounts[idx];
         job.milestone_status[idx] = 1;
 
-        // Check if all milestones are done to mark job as completed
-        let all_done = (0..job.milestone_count as usize).all(|i| job.milestone_status[i] == 1);
-        if all_done {
-            job.status = JobStatus::Completed;
-            // Update reputation only on final milestone
-            let profile = &mut ctx.accounts.freelancer_profile;
-            profile.jobs_completed += 1;
-            profile.total_earned += amount;
-
-            // Sweep any remaining vault balance back to client and close vault
-            let vault_balance = ctx.accounts.vault.amount;
-            if vault_balance > 0 {
-                let cpi_accounts = Transfer {
-                    from: ctx.accounts.vault.to_account_info(),
-                    to: ctx.accounts.client_token_account.to_account_info(),
-                    authority: job.to_account_info(),
-                };
-                let cpi_program = ctx.accounts.token_program.to_account_info();
-                let signer_seeds = &[
-                    b"job_v3",
-                    job.client.as_ref(),
-                    &job.job_id.to_le_bytes(),
-                    &[job.bump],
-                ];
-                token::transfer(
-                    CpiContext::new_with_signer(cpi_program.clone(), cpi_accounts, &[&signer_seeds[..]]),
-                    vault_balance,
-                )?;
-            }
-            // Close vault (destination: client system account)
-            let close_accounts = token::CloseAccount {
-                account: ctx.accounts.vault.to_account_info(),
-                destination: ctx.accounts.client.to_account_info(),
-                authority: job.to_account_info(),
-            };
-            let cpi_program = ctx.accounts.token_program.to_account_info();
-            token::close_account(CpiContext::new_with_signer(cpi_program, close_accounts, &[&[
-                b"job_v3",
-                job.client.as_ref(),
-                &job.job_id.to_le_bytes(),
-                &[job.bump],
-            ][..]]))?;
-        } else {
-            // Just update earnings for the partial release
-            let profile = &mut ctx.accounts.freelancer_profile;
-            profile.total_earned += amount;
-        }
         let client_key = job.client;
         let job_id_bytes = job.job_id.to_le_bytes();
         let bump = job.bump;
@@ -199,8 +185,48 @@ pub mod trustlayer {
             authority: job.to_account_info(),
         };
         let cpi_program = ctx.accounts.token_program.to_account_info();
-        let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(cpi_program.clone(), cpi_accounts, signer_seeds);
         token::transfer(cpi_ctx, amount)?;
+
+        // Check if all milestones are done to mark job as completed
+        let all_done = (0..job.milestone_count as usize).all(|i| job.milestone_status[i] == 1);
+        if all_done {
+            job.status = JobStatus::Completed;
+            // Update reputation only on final milestone
+            let profile = &mut ctx.accounts.freelancer_profile;
+            profile.jobs_completed += 1;
+            profile.total_earned += amount;
+
+            // Sweep any remaining vault balance back to client and close vault
+            ctx.accounts.vault.reload()?;
+            let vault_balance = ctx.accounts.vault.amount;
+            if vault_balance > 0 {
+                let sweep_accounts = Transfer {
+                    from: ctx.accounts.vault.to_account_info(),
+                    to: ctx.accounts.client_token_account.to_account_info(),
+                    authority: job.to_account_info(),
+                };
+                token::transfer(
+                    CpiContext::new_with_signer(cpi_program.clone(), sweep_accounts, signer_seeds),
+                    vault_balance,
+                )?;
+            }
+            // Close vault (destination: client system account)
+            let close_accounts = token::CloseAccount {
+                account: ctx.accounts.vault.to_account_info(),
+                destination: ctx.accounts.client.to_account_info(),
+                authority: job.to_account_info(),
+            };
+            token::close_account(CpiContext::new_with_signer(cpi_program, close_accounts, signer_seeds))?;
+
+            // Close job and application accounts programmatically
+            job.close(ctx.accounts.client.to_account_info())?;
+            ctx.accounts.application.close(ctx.accounts.freelancer.to_account_info())?;
+        } else {
+            // Just update earnings for the partial release
+            let profile = &mut ctx.accounts.freelancer_profile;
+            profile.total_earned += amount;
+        }
 
         Ok(())
     }
@@ -367,6 +393,10 @@ pub mod trustlayer {
         };
         let close_ctx = CpiContext::new_with_signer(cpi_program, close_accounts, signer_seeds);
         token::close_account(close_ctx)?;
+
+        // Increment arbiter's reputation counter
+        let arbiter_profile = &mut ctx.accounts.arbiter_profile;
+        arbiter_profile.disputes_resolved = arbiter_profile.disputes_resolved.saturating_add(1);
 
         Ok(())
     }
@@ -606,6 +636,14 @@ pub struct ApproveAndRelease<'info> {
     )]
     pub freelancer_profile: Account<'info, UserProfile>,
 
+    #[account(
+        mut,
+        seeds = [b"application", job.key().as_ref(), freelancer.key().as_ref()],
+        bump = application.bump,
+        close = freelancer,
+    )]
+    pub application: Account<'info, JobApplication>,
+
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, anchor_spl::associated_token::AssociatedToken>,
@@ -660,6 +698,13 @@ pub struct ReleaseMilestone<'info> {
         bump,
     )]
     pub freelancer_profile: Account<'info, UserProfile>,
+
+    #[account(
+        mut,
+        seeds = [b"application", job.key().as_ref(), freelancer.key().as_ref()],
+        bump = application.bump,
+    )]
+    pub application: Account<'info, JobApplication>,
 
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
@@ -790,6 +835,21 @@ pub struct ResolveDispute<'info> {
     )]
     pub vault: Account<'info, TokenAccount>,
 
+    #[account(
+        mut,
+        seeds = [b"application", job.key().as_ref(), freelancer.key().as_ref()],
+        bump = application.bump,
+        close = freelancer,
+    )]
+    pub application: Account<'info, JobApplication>,
+
+    #[account(
+        mut,
+        seeds = [b"arbiter_profile", arbiter.key().as_ref()],
+        bump = arbiter_profile.bump,
+    )]
+    pub arbiter_profile: Account<'info, ArbiterProfile>,
+
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, anchor_spl::associated_token::AssociatedToken>,
@@ -829,4 +889,61 @@ pub struct PostProjectUpdate<'info> {
     )]
     pub log: Account<'info, ProjectLog>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct WithdrawApplication<'info> {
+    #[account(mut)]
+    pub freelancer: Signer<'info>,
+    pub job: Account<'info, JobEscrow>,
+    #[account(
+        mut,
+        seeds = [b"application", job.key().as_ref(), freelancer.key().as_ref()],
+        bump = application.bump,
+        close = freelancer,
+    )]
+    pub application: Account<'info, JobApplication>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct RegisterArbiter<'info> {
+    #[account(mut)]
+    pub arbiter: Signer<'info>,
+    #[account(
+        init,
+        payer = arbiter,
+        space = 8 + ArbiterProfile::INIT_SPACE,
+        seeds = [b"arbiter_profile", arbiter.key().as_ref()],
+        bump
+    )]
+    pub profile: Account<'info, ArbiterProfile>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct UpdateArbiterProfile<'info> {
+    #[account(mut)]
+    pub arbiter: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [b"arbiter_profile", arbiter.key().as_ref()],
+        bump = profile.bump,
+        has_one = arbiter,
+    )]
+    pub profile: Account<'info, ArbiterProfile>,
+}
+
+#[account]
+pub struct ArbiterProfile {
+    pub arbiter: Pubkey,
+    pub name: String,
+    pub bio: String,
+    pub fee_percentage: u8,
+    pub disputes_resolved: u32,
+    pub bump: u8,
+}
+
+impl ArbiterProfile {
+    pub const INIT_SPACE: usize = 32 + (4 + 50) + (4 + 200) + 1 + 4 + 1;
 }

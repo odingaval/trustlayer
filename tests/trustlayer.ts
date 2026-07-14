@@ -67,6 +67,14 @@ describe("trustlayer", () => {
     return pda;
   };
 
+  const getArbiterProfilePDA = (arbiterKey: anchor.web3.PublicKey) => {
+    const [pda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("arbiter_profile"), arbiterKey.toBuffer()],
+      program.programId
+    );
+    return pda;
+  };
+
   before(async () => {
     // Airdrop SOL
     for (const kp of [client, freelancer, arbiter]) {
@@ -178,6 +186,7 @@ describe("trustlayer", () => {
     const jobPDA = getJobPDA(client.publicKey, JOB_ID);
     const vaultPDA = getVaultPDA(jobPDA);
     const freelancerProfilePDA = getProfilePDA(freelancer.publicKey);
+    const appPDA = getApplicationPDA(jobPDA, freelancer.publicKey);
 
     await program.methods
       .approveAndRelease()
@@ -190,6 +199,7 @@ describe("trustlayer", () => {
         freelancerTokenAccount,
         vault: vaultPDA,
         freelancerProfile: freelancerProfilePDA,
+        application: appPDA,
         systemProgram: anchor.web3.SystemProgram.programId,
         tokenProgram: TOKEN_PROGRAM_ID,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -330,6 +340,19 @@ describe("trustlayer", () => {
     const clientBalBefore = parseInt((await connection.getTokenAccountBalance(clientTokenAccountInfo.address)).value.amount);
     const freelancerBalBefore = parseInt((await connection.getTokenAccountBalance(freelancerTokenAccountInfo.address)).value.amount);
 
+    const arbiterProfilePDA = getArbiterProfilePDA(arbiter.publicKey);
+
+    // Register arbiter profile
+    await program.methods
+      .registerArbiter("Test Arbiter", "Dispute resolver", 5)
+      .accounts({
+        arbiter: arbiter.publicKey,
+        profile: arbiterProfilePDA,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      } as any)
+      .signers([arbiter])
+      .rpc();
+
     // Resolve: args are (freelancer_award, client_award) — give 600 to freelancer, 400 to client
     await program.methods
       .resolveDispute(new anchor.BN(600), new anchor.BN(400))
@@ -342,6 +365,8 @@ describe("trustlayer", () => {
         clientTokenAccount: clientTokenAccountInfo.address,
         freelancerTokenAccount: freelancerTokenAccountInfo.address,
         vault: vaultPDA,
+        application: appPDA,
+        arbiterProfile: arbiterProfilePDA,
         systemProgram: anchor.web3.SystemProgram.programId,
         tokenProgram: TOKEN_PROGRAM_ID,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,

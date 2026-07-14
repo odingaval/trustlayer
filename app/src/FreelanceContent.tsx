@@ -347,30 +347,51 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
     try { new PublicKey(addr); return true; } catch { return false; }
   };
 
+  // On-chain arbiter registry: fetch all ArbiterProfile accounts from chain
+  const [onChainArbiters, setOnChainArbiters] = useState<string[]>([]);
+
+  const fetchOnChainArbiters = useCallback(async () => {
+    if (!program) return;
+    try {
+      const profiles = await (program.account as any).arbiterProfile.all();
+      const addrs = profiles
+        .map((p: any) => p.account.arbiter.toString())
+        .filter((a: string) => a.length > 0);
+      setOnChainArbiters(addrs);
+    } catch {
+      // If no arbiters registered yet, fall back to env
+      const poolStr = import.meta.env.VITE_ARBITER_POOL || '';
+      if (poolStr) {
+        setOnChainArbiters(poolStr.split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0));
+      }
+    }
+  }, [program]);
+
+  useEffect(() => { fetchOnChainArbiters(); }, [fetchOnChainArbiters]);
+
   const arbiterPool = useMemo(() => {
+    if (onChainArbiters.length > 0) return onChainArbiters;
+    // Static fallback only when chain returns nothing
     const poolStr = import.meta.env.VITE_ARBITER_POOL || '';
     if (poolStr) {
       return poolStr.split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
     }
-    return [
-      'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
-      'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
-      'SysvarRent111111111111111111111111111111111'
-    ];
-  }, []);
+    return [];
+  }, [onChainArbiters]);
 
   const handleRandomizeArbiter = () => {
-    if (arbiterPool.length === 0) return;
+    if (arbiterPool.length === 0) {
+      toast.show('No verified arbiters found on-chain yet. Enter an address manually.', 'info');
+      return;
+    }
     let filteredPool = arbiterPool;
     if (publicKey) {
       filteredPool = arbiterPool.filter((addr: string) => addr !== publicKey.toString());
     }
-    if (filteredPool.length === 0) {
-      filteredPool = arbiterPool;
-    }
+    if (filteredPool.length === 0) filteredPool = arbiterPool;
     const randomIndex = Math.floor(Math.random() * filteredPool.length);
     setArbiterAddr(filteredPool[randomIndex]);
-    toast.show('Random arbiter assigned from pool!', 'info');
+    toast.show(`Arbiter assigned from ${onChainArbiters.length > 0 ? 'on-chain registry' : 'configured pool'}!`, 'info');
   };
 
 
@@ -543,16 +564,20 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
           [Buffer.from('user_profile'), freelancerPK.toBuffer()],
           program.programId
         );
+        const [appPDA] = PublicKey.findProgramAddressSync(
+          [Buffer.from('application'), jobPDA.toBuffer(), freelancerPK.toBuffer()],
+          program.programId
+        );
         const freelancerTA = getAssociatedTokenAddressSync(mintPK, freelancerPK);
         await program.methods.releaseMilestone(milestoneIdx)
           .accounts({
             client: publicKey, freelancer: freelancerPK, job: jobPDA,
             mint: mintPK, freelancerTokenAccount: freelancerTA, vault: vaultPDA,
-            freelancerProfile: freelancerProfilePDA
+            freelancerProfile: freelancerProfilePDA, application: appPDA
           } as any)
           .preInstructions([computeBudgetIx, priorityFeeIx])
           .rpc();
-        toast.show('Milestone payment released!', 'success');
+        toast.show('Milestone payment released! Rent reclaimed.', 'success');
       } else if (action === 'post_update') {
         const updateText = arg as string;
         const timestamp = Math.floor(Date.now() / 1000);
@@ -577,16 +602,20 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
           [Buffer.from('user_profile'), freelancerPK.toBuffer()],
           program.programId
         );
+        const [appPDA] = PublicKey.findProgramAddressSync(
+          [Buffer.from('application'), jobPDA.toBuffer(), freelancerPK.toBuffer()],
+          program.programId
+        );
         const freelancerTA = getAssociatedTokenAddressSync(mintPK, freelancerPK);
         await program.methods.approveAndRelease()
           .accounts({
             client: publicKey, freelancer: freelancerPK, job: jobPDA,
             mint: mintPK, freelancerTokenAccount: freelancerTA, vault: vaultPDA,
-            freelancerProfile: freelancerProfilePDA
+            freelancerProfile: freelancerProfilePDA, application: appPDA
           } as any)
           .preInstructions([computeBudgetIx, priorityFeeIx])
           .rpc();
-        toast.show('Payment released and reputation updated!', 'success');
+        toast.show('Payment released! Rent reclaimed ✅', 'success');
       } else if (action === 'dispute') {
         await program.methods.disputeJob()
           .accounts({ caller: publicKey, job: jobPDA })
@@ -597,15 +626,22 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
         const { freelancerAward, clientAward } = arg as { freelancerAward: number, clientAward: number };
         const freelancerPK = jobAccount.freelancer;
         const clientPK = jobAccount.client;
-        const [freelancerProfilePDA] = PublicKey.findProgramAddressSync([Buffer.from('user_profile'), freelancerPK.toBuffer()], program.programId);
         const freelancerTA = getAssociatedTokenAddressSync(mintPK, freelancerPK);
         const clientTA = getAssociatedTokenAddressSync(mintPK, clientPK);
-        
+        const [appPDA] = PublicKey.findProgramAddressSync(
+          [Buffer.from('application'), jobPDA.toBuffer(), freelancerPK.toBuffer()],
+          program.programId
+        );
+        const [arbiterProfilePDA] = PublicKey.findProgramAddressSync(
+          [Buffer.from('arbiter_profile'), publicKey.toBuffer()],
+          program.programId
+        );
         await program.methods.resolveDispute(new anchor.BN(freelancerAward), new anchor.BN(clientAward))
           .accounts({
             arbiter: publicKey, client: clientPK, freelancer: freelancerPK,
             job: jobPDA, mint: mintPK, freelancerTokenAccount: freelancerTA,
-            clientTokenAccount: clientTA, vault: vaultPDA, freelancerProfile: freelancerProfilePDA,
+            clientTokenAccount: clientTA, vault: vaultPDA,
+            application: appPDA, arbiterProfile: arbiterProfilePDA,
             tokenProgram: TOKEN_PROGRAM_ID
           } as any)
           .preInstructions([computeBudgetIx, priorityFeeIx])
@@ -967,9 +1003,11 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
                         isValidPubkey(arbiterAddr)
                           ? arbiterAddr === publicKey?.toString()
                             ? <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.1)', padding: '2px 8px', borderRadius: 6 }}>⚠ Cannot be yourself</span>
-                            : import.meta.env.VITE_DEFAULT_ARBITER && arbiterAddr === import.meta.env.VITE_DEFAULT_ARBITER
-                              ? <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#10B981', background: 'rgba(16,185,129,0.1)', padding: '2px 8px', borderRadius: 6 }}>✓ Platform Default</span>
-                              : <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#10B981', background: 'rgba(16,185,129,0.1)', padding: '2px 8px', borderRadius: 6 }}>✓ Valid Address</span>
+                            : onChainArbiters.includes(arbiterAddr)
+                              ? <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#10B981', background: 'rgba(16,185,129,0.1)', padding: '2px 8px', borderRadius: 6 }}>✓ On-Chain Verified</span>
+                              : import.meta.env.VITE_DEFAULT_ARBITER && arbiterAddr === import.meta.env.VITE_DEFAULT_ARBITER
+                                ? <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#10B981', background: 'rgba(16,185,129,0.1)', padding: '2px 8px', borderRadius: 6 }}>✓ Platform Default</span>
+                                : <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#fbbf24', background: 'rgba(251,191,36,0.1)', padding: '2px 8px', borderRadius: 6 }}>⚠ Not in Registry</span>
                           : <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.1)', padding: '2px 8px', borderRadius: 6 }}>✗ Invalid</span>
                       )}
                     </div>
@@ -1012,9 +1050,11 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
                     </div>
                     <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.5 }}>
                       The arbiter is a neutral third party who can resolve disputes and split funds if there's a disagreement.{' '}
-                      {import.meta.env.VITE_DEFAULT_ARBITER
-                        ? 'A platform default has been pre-filled — you may override it or randomize.'
-                        : 'You can input an address manually or click Auto-assign to select one from the trusted platform pool.'}
+                      {onChainArbiters.length > 0
+                        ? `${onChainArbiters.length} verified arbiter${onChainArbiters.length > 1 ? 's' : ''} found on-chain. Click Auto-assign to pick one.`
+                        : import.meta.env.VITE_DEFAULT_ARBITER
+                          ? 'A platform default has been pre-filled — you may override it.'
+                          : 'Enter an address manually. No verified on-chain arbiters registered yet.'}
                     </p>
                   </div>
 
