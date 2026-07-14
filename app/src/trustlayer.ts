@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/trustlayer.json`.
  */
 export type Trustlayer = {
-  "address": "DA5qsutDnzrU7ErRWh8stvKC7u1BUYzJec8VvNwxqSzU",
+  "address": "8cChvKd5QmU6CyHcaXKiYgBfFWkX4cQaYbh6FAYDCBwk",
   "metadata": {
     "name": "trustlayer",
     "version": "0.1.0",

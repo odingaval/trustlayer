@@ -18,7 +18,7 @@ describe("trustlayer", () => {
   const provider = AnchorProvider.env();
   anchor.setProvider(provider);
   // Deployed program ID on local validator — override IDL address for local testing
-  const LOCAL_PROGRAM_ID = new PublicKey("DA5qsutDnzrU7ErRWh8stvKC7u1BUYzJec8VvNwxqSzU");
+  const LOCAL_PROGRAM_ID = new PublicKey("8cChvKd5QmU6CyHcaXKiYgBfFWkX4cQaYbh6FAYDCBwk");
   const program = new Program({ ...idl, address: LOCAL_PROGRAM_ID.toBase58() } as any, provider) as Program<Trustlayer>;
   const connection = provider.connection;
 

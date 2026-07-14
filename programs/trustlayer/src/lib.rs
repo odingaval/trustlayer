@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 
-declare_id!("DA5qsutDnzrU7ErRWh8stvKC7u1BUYzJec8VvNwxqSzU");
+declare_id!("8cChvKd5QmU6CyHcaXKiYgBfFWkX4cQaYbh6FAYDCBwk");
 
 #[program]
 pub mod trustlayer {

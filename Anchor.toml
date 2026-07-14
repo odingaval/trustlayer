@@ -8,6 +8,9 @@ skip-lint = false
 [programs.localnet]
 trustlayer = "8cChvKd5QmU6CyHcaXKiYgBfFWkX4cQaYbh6FAYDCBwk"
 
+[programs.devnet]
+trustlayer = "8cChvKd5QmU6CyHcaXKiYgBfFWkX4cQaYbh6FAYDCBwk"
+
 [registry]
 url = "https://api.apr.dev"
 

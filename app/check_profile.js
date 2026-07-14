@@ -1,7 +1,7 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 
 const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
-const programId = new PublicKey('DA5qsutDnzrU7ErRWh8stvKC7u1BUYzJec8VvNwxqSzU');
+const programId = new PublicKey('8cChvKd5QmU6CyHcaXKiYgBfFWkX4cQaYbh6FAYDCBwk');
 const user = new PublicKey('B9Tki7zw5PeL3aWPu8Jfvc5jancmEEzMumZXDBQ53eNJ');
 
 const [profilePDA] = PublicKey.findProgramAddressSync(

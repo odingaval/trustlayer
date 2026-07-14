@@ -62,9 +62,11 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [editUsername, setEditUsername] = useState('');
   const [editBio, setEditBio] = useState('');
-  const [isProfileLoading, setIsProfileLoading] = useState(true);
+  const [isProfileLoading, setIsProfileLoading] = useState(false);
   const [setupUsername, setSetupUsername] = useState('');
   const [setupBio, setSetupBio] = useState('');
+  const [solBalance, setSolBalance] = useState<number | null>(null);
+  const [airdropping, setAirdropping] = useState(false);
 
   const program = useMemo(() => {
     const wallet = anchorWallet || (publicKey && signTransaction && signAllTransactions
@@ -292,24 +294,55 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
   }, [mintDecimals]);
 
   const fetchBalance = useCallback(async () => {
-    if (!connection || !publicKey || !mint) {
-      setTokenBalance(null); return;
+    if (!connection || !publicKey) {
+      setTokenBalance(null);
+      setSolBalance(null);
+      return;
     }
     try {
-      const mintPK = new PublicKey(mint);
-      const ata = getAssociatedTokenAddressSync(mintPK, publicKey);
-      const balance = await connection.getTokenAccountBalance(ata);
-      setTokenBalance(balance.value.uiAmountString || '0');
+      // Get SOL balance
+      const lamports = await connection.getBalance(publicKey);
+      setSolBalance(lamports / 1e9);
+
+      if (mint) {
+        try {
+          const mintPK = new PublicKey(mint);
+          const ata = getAssociatedTokenAddressSync(mintPK, publicKey);
+          const balance = await connection.getTokenAccountBalance(ata);
+          setTokenBalance(balance.value.uiAmountString || '0');
+        } catch {
+          setTokenBalance('0');
+        }
+      } else {
+        setTokenBalance(null);
+      }
     } catch (err) {
-      setTokenBalance('0');
+      console.error('Failed to fetch balance:', err);
     }
   }, [connection, publicKey, mint]);
 
   useEffect(() => {
     fetchBalance();
-    const interval = setInterval(fetchBalance, 30000); // Update every 30s instead of 10s
+    const interval = setInterval(fetchBalance, 15000); // Update every 15s for better responsiveness
     return () => clearInterval(interval);
   }, [fetchBalance]);
+
+  const handleRequestAirdrop = async () => {
+    if (!connection || !publicKey) return;
+    setAirdropping(true);
+    try {
+      toast.show('Requesting 1 SOL from devnet faucet...', 'info');
+      const sig = await connection.requestAirdrop(publicKey, 1e9);
+      await connection.confirmTransaction(sig, 'confirmed');
+      toast.show('Airdrop successful! 1 SOL added.', 'success');
+      fetchBalance();
+    } catch (err: any) {
+      console.error('Airdrop failed:', err);
+      toast.show('Airdrop failed. Please try requesting at faucet.solana.com.', 'error');
+    } finally {
+      setAirdropping(false);
+    }
+  };
 
   const handleCreateTestMint = async () => {
     if (!publicKey || !sendTransaction) return;
@@ -489,10 +522,16 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
           profile: profilePDA,
           systemProgram: SystemProgram.programId,
         } as any).rpc();
-      toast.show('Profile created!', 'success');
+      toast.show('Profile created! ✅', 'success');
       fetchProfile();
     } catch (err: any) {
-      toast.show('Failed to create profile: ' + err.message, 'error');
+      const msg: string = err?.message || String(err);
+      // User clicked "Cancel" in Phantom — not an error
+      if (msg.toLowerCase().includes('cancelled') || msg.toLowerCase().includes('rejected') || msg.toLowerCase().includes('user rejected')) {
+        toast.show('Transaction cancelled. Open Phantom and click “Approve” to create your profile.', 'info');
+      } else {
+        toast.show('Failed to create profile: ' + msg, 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -691,13 +730,13 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
       for (const raw of rawApps) {
         try {
           parsed.push({ publicKey: raw.pubkey, account: coder.decode("jobApplication", raw.account.data) });
-        } catch {}
+        } catch { }
       }
       setApplications(prev => {
         const filtered = prev.filter(a => a.account.job.toString() !== jobPubkey);
         return [...filtered, ...parsed];
       });
-    } catch {}
+    } catch { }
   }, [program, connection]);
 
   const renderStatus = (statusObj: any) => {
@@ -861,8 +900,8 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
                         </button>
                       </div>
                       <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                        {viewMode === 'hire' 
-                          ? `Client · ${myClientJobs.length} Gigs Posted` 
+                        {viewMode === 'hire'
+                          ? `Client · ${myClientJobs.length} Gigs Posted`
                           : `Freelancer · ${activeProfile.jobsCompleted} Completed · ${activeProfile.totalEarned.toString()} Earned`
                         }
                       </p>
@@ -879,6 +918,12 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
               <button onClick={() => fetchJobs(true)} disabled={fetching} className="btn-ghost" title="Refresh jobs" style={{ padding: '8px 10px' }}>
                 <RefreshCw size={15} className={fetching ? 'spin' : ''} />
               </button>
+            )}
+            {solBalance !== null && (
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.04)', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', marginRight: 4, display: 'flex', alignItems: 'center', gap: 6, height: 38 }}>
+                <span style={{ color: 'var(--secondary)' }}>☉</span>
+                <span>{solBalance.toFixed(2)} SOL</span>
+              </div>
             )}
             <WalletMultiButton />
           </div>
@@ -902,9 +947,36 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
         {program && !userProfile && !isProfileLoading && publicKey && (
           <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="glass" style={{ padding: 24, marginBottom: 32, border: '1px solid var(--secondary)', background: 'linear-gradient(135deg, rgba(20,241,149,0.05), rgba(0,0,0,0))' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
+              <div style={{ flex: 1 }}>
                 <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 4 }}>Complete Your Profile</h3>
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 20 }}>Set a username to build your reputation on TrustLayer.</p>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 12 }}>Set a username to build your reputation on TrustLayer.</p>
+
+                {/* Phantom devnet warning & SOL Check */}
+                {solBalance !== null && solBalance < 0.01 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, padding: '12px 14px', marginBottom: 20 }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                      <span style={{ fontSize: '1rem', lineHeight: 1, marginTop: 1 }}>⚠️</span>
+                      <p style={{ fontSize: '0.78rem', color: '#ef4444', margin: 0, lineHeight: 1.5, flex: 1 }}>
+                        <strong>Insufficient SOL:</strong> You need a small amount of SOL (~0.003 SOL) to pay for transaction fees and the rent-exempt storage for your new on-chain profile. Your current balance is <strong>{solBalance.toFixed(4)} SOL</strong>.
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleRequestAirdrop}
+                      disabled={airdropping}
+                      className="btn-primary"
+                      style={{ background: '#ef4444', alignSelf: 'flex-start', fontSize: '0.75rem', padding: '6px 12px', height: 'auto', display: 'flex', alignItems: 'center', gap: 6, width: 'auto', minWidth: 'auto', cursor: 'pointer' }}
+                    >
+                      {airdropping ? <RefreshCw size={12} className="spin" /> : '🪂 Request Free 1 SOL Airdrop'}
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 8, padding: '10px 14px', marginBottom: 20 }}>
+                    <span style={{ fontSize: '1rem', lineHeight: 1, marginTop: 1 }}>⚠️</span>
+                    <p style={{ fontSize: '0.78rem', color: '#fbbf24', margin: 0, lineHeight: 1.5 }}>
+                      <strong>Devnet note:</strong> Phantom will show an “unverified program” warning — this is expected on devnet. Click&nbsp;<strong>Approve</strong> (not Cancel) to continue.
+                    </p>
+                  </div>
+                )}
 
                 <div style={{ display: 'flex', gap: 12, maxWidth: 600 }}>
                   <div style={{ flex: 1 }}>
@@ -941,7 +1013,7 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
                   </div>
                 </div>
               </div>
-              <div style={{ width: 48, height: 48, borderRadius: 12, background: 'rgba(20,241,149,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: 48, height: 48, borderRadius: 12, background: 'rgba(20,241,149,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginLeft: 16 }}>
                 <User size={24} color="var(--secondary)" />
               </div>
             </div>
@@ -975,7 +1047,7 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
                     <a href="https://phantom.app" target="_blank" rel="noopener noreferrer" style={{ marginTop: 12, color: 'var(--text-muted)', fontSize: '0.75rem', textDecoration: 'underline', cursor: 'pointer' }}>Don't have a wallet? Get Phantom →</a>
                   </div>
                 )}
-                
+
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 18, filter: !publicKey ? 'grayscale(0.8) opacity(0.5)' : 'none', pointerEvents: !publicKey ? 'none' : 'auto', transition: 'all 0.4s ease' }}>
                   <div>
                     <label className="label">Job Title</label>
@@ -1367,10 +1439,10 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
                                         style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', color: 'white', fontSize: '0.8rem', outline: 'none' }}
                                       />
                                       <div style={{ display: 'flex', gap: 8 }}>
-                                        <button 
-                                          onClick={() => handleAction(job, 'submit', submitLink)} 
-                                          disabled={!submitLink || !!processing} 
-                                          className="btn-primary" 
+                                        <button
+                                          onClick={() => handleAction(job, 'submit', submitLink)}
+                                          disabled={!submitLink || !!processing}
+                                          className="btn-primary"
                                           style={{ flex: 1, justifyContent: 'center', background: 'var(--secondary)' }}
                                         >
                                           {isProc ? <RefreshCw size={14} className="spin" /> : 'Confirm Submission'}
@@ -1391,14 +1463,14 @@ export function FreelanceContent({ toast, onBack }: { toast: any; onBack: () => 
                                 </button>
                               )}
                               {(isClient || isFreelancer) && (status === 'inProgress' || status === 'inReview') && (
-                                <button 
+                                <button
                                   onClick={() => {
-                                    if(window.confirm('Are you sure? This will lock funds and alert the Arbiter.')) {
+                                    if (window.confirm('Are you sure? This will lock funds and alert the Arbiter.')) {
                                       handleAction(job, 'dispute');
                                     }
-                                  }} 
-                                  disabled={!!processing} 
-                                  className="btn-secondary" 
+                                  }}
+                                  disabled={!!processing}
+                                  className="btn-secondary"
                                   style={{ color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.2)', background: 'rgba(239, 68, 68, 0.05)', fontSize: '0.75rem', justifyContent: 'center' }}
                                 >
                                   <Shield size={14} /> Raise Dispute

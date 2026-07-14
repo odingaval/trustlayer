@@ -11,7 +11,6 @@ if (!window.process) window.process = process;
 
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
-import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
 import { clusterApiUrl } from '@solana/web3.js';
 import { Loader2, AlertCircle } from 'lucide-react';
 
@@ -22,11 +21,9 @@ export default function SolanaWrapper({ toast, onBack }: { toast: any; onBack: (
   // Program is deployed on Devnet
   const endpoint = useMemo(() => clusterApiUrl('devnet'), []);
   
-  // Explicitly list adapters for better stability
-  const wallets = useMemo(() => [
-    new PhantomWalletAdapter(),
-    new SolflareWalletAdapter(),
-  ], []);
+  // Phantom & Solflare self-register as Standard Wallets — no need for legacy adapters.
+  // Passing an empty array lets the Standard Wallet detection handle everything.
+  const wallets = useMemo(() => [], []);
 
   return (
     <ConnectionProvider endpoint={endpoint}>
